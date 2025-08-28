@@ -11,19 +11,17 @@ const config = {
   // Disable React Strict Mode to prevent double API calls
   reactStrictMode: false,
   
-  // Enable static export for Electron
-  output: 'export',
-  trailingSlash: true,
-  skipTrailingSlashRedirect: true,
-  distDir: 'out',
-  
-  // Configure for static export
-  images: {
-    unoptimized: true
-  },
-  
-  // Remove asset prefix for Electron static files
-  assetPrefix: '',
+  // Enable static export for Electron (only in production)
+  ...(process.env.NODE_ENV === 'production' && {
+    output: 'export',
+    trailingSlash: true,
+    skipTrailingSlashRedirect: true,
+    distDir: 'out',
+    images: {
+      unoptimized: true
+    },
+    assetPrefix: '',
+  }),
   
   // Disable ESLint and TypeScript checks during build for faster development
   eslint: {

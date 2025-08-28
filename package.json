@@ -5,12 +5,12 @@
   "type": "module",
   "main": "src/main-nextjs.cjs",
   "scripts": {
-    "start": "electron .",
+    "start": "NODE_ENV=production electron .",
     "dev": "concurrently \"npm run next-dev\" \"wait-on http://localhost:3000 && npm run dev-nextjs\"",
     "build": "electron-builder",
-    "next-dev": "next dev",
-    "next-build": "next build",
-    "build-for-electron": "SKIP_ENV_VALIDATION=1 npm run next-build && node fix-electron-paths.cjs",
+    "next-dev": "NODE_ENV=development next dev",
+    "next-build": "NODE_ENV=production next build",
+    "build-for-electron": "SKIP_ENV_VALIDATION=1 NODE_ENV=production npm run next-build && node fix-electron-paths.cjs",
     "dev-nextjs": "NODE_ENV=development ELECTRON_MAIN=./src/main-nextjs.cjs electron ."
   },
   "keywords": [
@@ -22,7 +22,6 @@
   "author": "TriangleOS Team",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
     "@ant-design/icons": "^6.0.0",
     "@hookform/resolvers": "^5.0.1",
     "@radix-ui/react-accordion": "^1.2.8",
@@ -57,6 +56,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "express": "^4.18.2",
     "firebase": "^11.10.0",
     "framer-motion": "^12.6.5",
     "hast": "^1.0.0",
@@ -94,26 +94,26 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
-    "electron": "^27.0.0",
-    "electron-builder": "^24.6.4",
-    "concurrently": "^8.2.0",
-    "wait-on": "^7.0.1",
     "@eslint/eslintrc": "^3.3.1",
-    "@tailwindcss/postcss": "^4.0.15",
     "@types/hast": "^3.0.4",
     "@types/node": "^20.14.10",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/react-syntax-highlighter": "^15.5.13",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^8.2.0",
     "dotenv-cli": "^8.0.0",
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4",
     "eslint": "^9.23.0",
     "eslint-config-next": "^15.2.3",
     "postcss": "^8.5.3",
     "prettier": "^3.5.3",
     "prettier-plugin-tailwindcss": "^0.6.11",
     "raw-loader": "^4.0.2",
-    "tailwindcss": "^4.0.15",
+    "tailwindcss": "^3.4.17",
     "typescript": "^5.8.2",
-    "typescript-eslint": "^8.27.0"
+    "typescript-eslint": "^8.27.0",
+    "wait-on": "^7.0.1"
   }
 }
