@@ -1,0 +1,22 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+.env
+.env.local
+.env.production
+.vscode/
+*.pid
+*.seed
+*.pid.lock
+*.tgz
+*.tar.gz
+coverage/
+.nyc_output
+.cache/
+tmp/
+temp/
+
+# Ignore src directory since it will be a submodule
+src/
