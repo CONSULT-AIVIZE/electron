@@ -17,6 +17,3 @@ coverage/
 .cache/
 tmp/
 temp/
-
-# Ignore src directory since it will be a submodule
-src/
