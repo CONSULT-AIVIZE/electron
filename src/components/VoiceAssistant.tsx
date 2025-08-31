@@ -208,73 +208,78 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ className = '' }) => {
   }
 
   return (
-    <>
-      {/* Voice Status Panel - only show when active */}
-      {(transcript || lastCommand || error) && (
-        <div className="fixed top-4 right-4 z-50 max-w-sm">
-          <div className="bg-black bg-opacity-80 backdrop-blur-xl border border-white border-opacity-10 rounded-xl p-4 shadow-2xl">
-            {error && (
-              <div className="flex items-center space-x-2 text-red-400 text-sm mb-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span>{error}</span>
-              </div>
-            )}
-            {transcript && (
-              <div className="flex items-center space-x-2 text-blue-400 text-sm mb-2">
-                <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
-                <span>听到: {transcript}</span>
-              </div>
-            )}
-            {lastCommand && (
-              <div className="flex items-center space-x-2 text-green-400 text-xs">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <span>执行: {lastCommand}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Mini Voice Control Button - bottom right corner */}
-      <div className="fixed bottom-6 right-6 z-40">
+    <div className="h-full w-full flex flex-col items-center justify-center relative z-10">
+      {/* Voice Status Indicator - Center top */}
+      <div className="mb-8">
         <button
           onClick={toggleListening}
           className={`
-            w-12 h-12 rounded-full shadow-lg transition-all duration-300 group
+            w-20 h-20 rounded-full shadow-2xl transition-all duration-500 flex items-center justify-center relative
             ${isListening 
-              ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
-              : 'bg-gray-800 bg-opacity-90 hover:bg-gray-700 border border-white border-opacity-20'
+              ? 'bg-red-500 hover:bg-red-400' 
+              : 'bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-400 hover:to-purple-500'
             }
-            backdrop-blur-sm hover:scale-110 active:scale-95
+            hover:scale-110 active:scale-95
           `}
           title={isListening ? '停止语音识别' : '开始语音控制'}
         >
           {isListening ? (
-            <svg className="w-6 h-6 text-white mx-auto" fill="currentColor" viewBox="0 0 24 24">
+            <svg className="w-10 h-10 text-white" fill="currentColor" viewBox="0 0 24 24">
               <path d="M6 6h12v12H6z"/>
             </svg>
           ) : (
-            <svg className="w-6 h-6 text-white mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
             </svg>
           )}
           
-          {/* Tooltip */}
-          <div className="absolute bottom-full right-0 mb-2 px-2 py-1 bg-black text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-            {isListening ? '停止语音' : '语音控制'}
-          </div>
+          {/* Voice indicator rings */}
+          {isListening && (
+            <>
+              <div className="absolute inset-0 rounded-full border-2 border-red-300 animate-ping"></div>
+              <div className="absolute -inset-2 rounded-full border border-red-200 animate-pulse"></div>
+              <div className="absolute -inset-4 rounded-full border border-red-100 opacity-50 animate-pulse" style={{animationDelay: '0.5s'}}></div>
+            </>
+          )}
         </button>
+
+        {/* Status indicator below button */}
+        <div className="flex items-center justify-center space-x-2 mt-4">
+          <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-red-400 animate-pulse' : 'bg-white bg-opacity-30'}`}></div>
+          <span className="text-white text-sm opacity-70">
+            {isListening ? '正在监听' : '点击开始'}
+          </span>
+        </div>
+      </div>
+
+      {/* Lyrics-style transcript display - Center */}
+      <div className="max-w-4xl w-full px-8 text-center">
+        <div className="min-h-[120px] flex items-center justify-center">
+          {transcript ? (
+            <div className="text-white text-3xl font-light leading-relaxed animate-pulse">
+              {transcript}
+              <span className="animate-pulse ml-1 text-blue-400">|</span>
+            </div>
+          ) : lastCommand ? (
+            <div className="text-white text-2xl font-light leading-relaxed opacity-80">
+              {lastCommand}
+            </div>
+          ) : (
+            <div className="text-white text-xl opacity-40">
+              {isListening ? '请开始说话...' : '点击麦克风开始语音交互'}
+            </div>
+          )}
+        </div>
         
-        {/* Voice indicator ring */}
-        {isListening && (
-          <div className="absolute inset-0 rounded-full border-2 border-red-400 animate-ping"></div>
+        {/* Error display */}
+        {error && (
+          <div className="mt-4 text-red-400 text-sm bg-red-500 bg-opacity-10 rounded-lg px-4 py-2 backdrop-blur-sm">
+            {error}
+          </div>
         )}
       </div>
-    </>
+
+    </div>
   )
 }
 
