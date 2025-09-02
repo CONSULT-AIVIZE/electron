@@ -4,7 +4,21 @@
       "Bash(npm install)",
       "Bash(npm run build-for-electron:*)",
       "Bash(npm start)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(lsof:*)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/**)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/**)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/**)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
+      "Bash(curl:*)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/src/app/login/**)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/src/hooks/**)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
+      "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)"
     ],
     "deny": [],
     "ask": []
