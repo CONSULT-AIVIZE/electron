@@ -14,7 +14,7 @@ export const initializeDefaultApps = async (): Promise<void> => {
   
   // 从环境变量读取应用配置
   const DEFAULT_APP_URL = process.env.NEXT_PUBLIC_DEFAULT_APP_URL || 'http://localhost:3000'
-  const DEFAULT_APP_NAME = process.env.NEXT_PUBLIC_DEFAULT_APP_NAME || 'CONSULT_AI 咨询平台'
+  const DEFAULT_APP_NAME = process.env.NEXT_PUBLIC_DEFAULT_APP_NAME || 'Aivize.ai 智能咨询'
   
   try {
     // 尝试动态发现并注册应用
@@ -27,15 +27,15 @@ export const initializeDefaultApps = async (): Promise<void> => {
       console.log('⚠️ 无法自动发现应用协议，使用后备配置')
       
       const fallbackConfig: AppConfig = {
-        id: 'fallback.app',
+        id: 'consult-ai.app',
         name: DEFAULT_APP_NAME,
         url: DEFAULT_APP_URL,
-        type: 'website',
-        icon: '🌐',
-        description: '后备应用配置',
+        type: 'spa',
+        icon: '🧠',
+        description: 'AI驱动的专业管理咨询平台',
         features: {
           voice_control: true,
-          ai_styling: true,
+          ai_styling: false,
           traditional_mode: true,
           adaptive_ui: true
         }
@@ -51,15 +51,15 @@ export const initializeDefaultApps = async (): Promise<void> => {
     // 即使出现错误，也要确保有一个后备应用配置
     console.log('🔧 创建紧急后备应用配置')
     const emergencyConfig: AppConfig = {
-      id: 'emergency.app',
+      id: 'consult-ai.emergency',
       name: DEFAULT_APP_NAME,
       url: DEFAULT_APP_URL,
-      type: 'website',
-      icon: '🌐',
-      description: '紧急后备应用配置',
+      type: 'spa',
+      icon: '🧠',
+      description: 'Aivize.ai 智能咨询平台 (紧急模式)',
       features: {
         voice_control: true,
-        ai_styling: true,
+        ai_styling: false,
         traditional_mode: true,
         adaptive_ui: true
       }
