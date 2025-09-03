@@ -2,9 +2,8 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { RuntimeService, RuntimeCommand, AppConfig } from '../core/runtime/RuntimeService'
-import { injectBridgeToIframe } from '../core/bridge/BridgeInjector'
 import MatrixLoading from './MatrixLoading'
-import VoiceConsultPage from './voice-pages/VoiceConsultPage'
+import VoiceControlPage from './voice-pages/VoiceControlPage'
 import VoiceSettingsPage from './voice-pages/VoiceSettingsPage'
 import VoiceWorkstudioPage from './voice-pages/VoiceWorkstudioPage'
 import ErrorBoundary from './ErrorBoundary'
@@ -25,7 +24,10 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
   const [isGeneratingPage, setIsGeneratingPage] = useState(false) // Unified loading状态
   const [generatingMessage, setGeneratingMessage] = useState('') // 生成消息
   const iframeRef = useRef<HTMLIFrameElement>(null)
-  const [bridgeInjected, setBridgeInjected] = useState(false)
+  
+  // 动态指令状态
+  const [dynamicCommands, setDynamicCommands] = useState<RuntimeCommand[]>([])
+  const [currentPageName, setCurrentPageName] = useState('')
   
   // 语音识别状态
   const [isListening, setIsListening] = useState(false)
@@ -49,6 +51,12 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
     
     // 监听指令变化
     const handleCommandsChange = (newCommands: RuntimeCommand[]) => {
+      console.log('🔄 运行时指令更新:', newCommands.length, '个')
+      console.log('📋 新指令列表:', newCommands.map(cmd => ({ 
+        id: cmd.id, 
+        triggers: cmd.triggers,
+        description: cmd.description 
+      })))
       setCommands(newCommands)
     }
     
@@ -56,9 +64,16 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
     
     // 监听来自iframe的消息
     const handleMessage = (event: MessageEvent) => {
-      if (event.source !== iframeRef.current?.contentWindow) return
+      // 放宽消息源检查，允许来自iframe内容的消息
+      if (event.source !== iframeRef.current?.contentWindow) {
+        // 只接收来自CONSULT_AI的消息
+        if (!event.data?.source || event.data.source !== 'consult_ai') {
+          return
+        }
+      }
       
-      const { type, ...data } = event.data
+      const { type, data } = event.data
+      console.log('📨 Triangle OS 接收到消息:', { type, data, source: event.source === iframeRef.current?.contentWindow ? 'iframe' : 'other' })
       
       switch (type) {
         case 'auth_success':
@@ -75,7 +90,37 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
           
         case 'page_ready':
           console.log('📄 页面准备就绪:', data.page)
+          // 新页面准备就绪时，清除旧的动态指令（如果有的话）
+          if (data.page && data.page !== currentPageName) {
+            clearPageCommands()
+          }
           setTimeout(() => initializeRuntime(), 500)
+          break
+          
+        case 'command_registered':
+          console.log('🎯 接收到动态指令注册:', data)
+          if (data?.command) {
+            console.log('📝 注册动态指令:', data.command)
+            setDynamicCommands(prev => {
+              // 避免重复注册同一个指令
+              const exists = prev.find(cmd => cmd.id === data.command.id)
+              if (exists) {
+                console.log('🔄 更新现有指令:', data.command.id)
+                return prev.map(cmd => cmd.id === data.command.id ? data.command : cmd)
+              } else {
+                console.log('➕ 添加新指令:', data.command.id)
+                return [...prev, data.command]
+              }
+            })
+            setCurrentPageName(data.page || 'unknown')
+          }
+          break
+          
+        case 'command_unregistered':
+          console.log('🗑️ 接收到动态指令注销:', data)
+          if (data?.commandId) {
+            setDynamicCommands(prev => prev.filter(cmd => cmd.id !== data.commandId))
+          }
           break
       }
     }
@@ -184,21 +229,25 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
   // 处理语音指令
   const processVoiceCommand = useCallback(async (command: string) => {
     console.log('Processing voice command:', command)
+    console.log('🔍 可用运行时指令:', commands.length, '个')
+    console.log('🔍 运行时指令列表:', commands.map(cmd => ({ id: cmd.id, triggers: cmd.triggers })))
 
     // 首先尝试匹配运行时指令
     const matchedCommand = runtimeService.matchCommand(command)
     if (matchedCommand) {
-      console.log('Matched runtime command:', matchedCommand)
+      console.log('✅ 匹配到运行时指令:', matchedCommand)
       await executeCommand(matchedCommand)
       return
+    } else {
+      console.log('❌ 未匹配到运行时指令，尝试导航指令')
     }
 
-    // 后备导航指令 - 根据语音指令决定显示什么页面
+    // 后备导航指令 - 通用系统级指令
     const navigationCommands = [
-      { patterns: ['打开咨询', '咨询', '开始咨询'], route: 'voice-consult' }, // 显示AI定制咨询页面
-      { patterns: ['打开设置', '设置', '系统设置'], route: 'voice-settings' }, // 显示AI定制设置页面  
       { patterns: ['回到主页', '主页', '桌面', '语音主页'], route: 'voice-home' }, // 显示语音主页
-      { patterns: ['工作室', '显示工作室'], route: 'voice-workstudio' }, // 语音优化的工作室页面
+      { patterns: ['打开设置', '设置', '系统设置'], route: 'voice-settings' }, // 显示系统设置页面  
+      { patterns: ['工作室', '显示工作室', '指令工作室'], route: 'voice-workstudio' }, // 语音指令工作室页面
+      { patterns: ['语音控制', '控制中心', '语音中心'], route: 'voice-control' }, // 语音控制中心
     ]
 
     const lowerCommand = command.toLowerCase()
@@ -233,59 +282,38 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
     }
   }, [isListening, isSupported])
 
-  // 处理iframe导航的辅助函数
-  const handleIframeNavigation = async (target: string) => {
+  // 切换页面时的清理函数
+  const clearPageCommands = useCallback(() => {
+    console.log('🗑️ 清除之前页面的动态指令')
+    setDynamicCommands([])
+    setCurrentPageName('')
+  }, [])
+
+  // 简化版iframe导航（不注入Bridge）
+  const handleIframeNavigationSimple = async (target: string) => {
+    console.log('🚀 简化iframe导航:', target)
+    
+    // 页面切换前清除之前的动态指令
+    clearPageCommands()
+    
     return new Promise<void>((resolve, reject) => {
       try {
         if (!iframeRef.current) {
-          resolve() // 没有iframe时直接成功
+          console.log('⚠️ iframe ref不存在，跳过导航')
+          resolve()
           return
         }
 
+        console.log('✅ iframe ref存在，开始设置URL')
         const fullUrl = target.startsWith('http') ? target : websiteUrl + target
         console.log(`🔗 设置iframe URL: ${fullUrl}`)
         
         // 设置iframe源
         iframeRef.current.src = fullUrl
         
-        // 通过postMessage通知iframe导航
-        const postMessageTimeout = setTimeout(() => {
-          try {
-            if (iframeRef.current?.contentWindow) {
-              iframeRef.current.contentWindow.postMessage({
-                type: 'os_navigate',
-                url: target
-              }, '*')
-              console.log(`📬 发送导航消息到iframe: ${target}`)
-            }
-          } catch (postMessageError) {
-            console.warn('⚠️ PostMessage失败:', postMessageError)
-          }
-        }, 100)
-        
-        // 重新注入bridge到新页面
-        setBridgeInjected(false)
-        const bridgeTimeout = setTimeout(async () => {
-          try {
-            await injectBridge()
-            console.log('🌉 Bridge重新注入成功')
-          } catch (bridgeError) {
-            console.warn('⚠️ Bridge注入失败:', bridgeError)
-          }
-        }, 1000)
-        
-        // 设置超时以避免无限等待
-        const navigationTimeout = setTimeout(() => {
-          clearTimeout(postMessageTimeout)
-          clearTimeout(bridgeTimeout)
-          resolve()
-        }, 3000)
-        
         // 监听iframe加载完成
         const handleLoad = () => {
-          clearTimeout(navigationTimeout)
-          clearTimeout(postMessageTimeout)
-          clearTimeout(bridgeTimeout)
+          console.log('📄 iframe加载完成')
           if (iframeRef.current) {
             iframeRef.current.removeEventListener('load', handleLoad)
           }
@@ -296,12 +324,19 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
           iframeRef.current.addEventListener('load', handleLoad)
         }
         
+        // 设置超时
+        setTimeout(() => {
+          console.log('⏰ iframe加载超时，继续执行')
+          resolve()
+        }, 5000)
+        
       } catch (error) {
-        console.error('🚫 Iframe导航失败:', error)
-        reject(new Error(`Iframe导航失败: ${error.message || '未知错误'}`))
+        console.error('🚫 iframe导航失败:', error)
+        resolve() // 即使失败也继续
       }
     })
   }
+
 
   // 更新运行时上下文的辅助函数
   const updateRuntimeContext = async (target: string) => {
@@ -323,27 +358,11 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
     })
   }
 
-  // 注入Bridge脚本到iframe中
-  const injectBridge = async () => {
-    if (!iframeRef.current || bridgeInjected) return
-
-    try {
-      const success = await injectBridgeToIframe(iframeRef.current)
-      if (success) {
-        setBridgeInjected(true)
-      }
-    } catch (error) {
-      console.error('❌ Bridge 注入失败:', error)
-    }
-  }
 
   const initializeRuntime = async () => {
     try {
       console.log('🚀 AI增强模式：初始化运行时环境')
       console.log('App Config:', appConfig)
-      
-      // 首先注入Bridge脚本
-      await injectBridge()
       
       // 加载应用到运行时
       const loadResult = await runtimeService.loadApp(appConfig)
@@ -383,22 +402,6 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
           console.log('⚠️ 未加载到外部指令，使用基础系统指令')
           const basicCommands: RuntimeCommand[] = [
             {
-              id: 'open_consult',
-              triggers: ['打开咨询', '咨询', '开始咨询'],
-              description: '打开AI咨询',
-              icon: '💬',
-              action: { type: 'navigate', target: 'voice-consult' },
-              scope: 'global'
-            },
-            {
-              id: 'open_settings',
-              triggers: ['打开设置', '设置', '系统设置'],
-              description: '打开设置',
-              icon: '⚙️',
-              action: { type: 'navigate', target: 'voice-settings' },
-              scope: 'global'
-            },
-            {
               id: 'navigate_home',
               triggers: ['回到主页', '主页', '桌面', '语音主页'],
               description: '返回语音主页',
@@ -407,16 +410,32 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
               scope: 'global'
             },
             {
+              id: 'open_settings',
+              triggers: ['打开设置', '设置', '系统设置'],
+              description: '打开系统设置',
+              icon: '⚙️',
+              action: { type: 'navigate', target: 'voice-settings' },
+              scope: 'global'
+            },
+            {
               id: 'open_workstudio',
-              triggers: ['工作室', '显示工作室', '指令集'],
-              description: '显示工作室',
+              triggers: ['工作室', '显示工作室', '指令工作室'],
+              description: '显示指令工作室',
               icon: '🛠️',
               action: { type: 'navigate', target: 'voice-workstudio' },
               scope: 'global'
             },
             {
+              id: 'open_voice_control',
+              triggers: ['语音控制', '控制中心', '语音中心'],
+              description: '打开语音控制中心',
+              icon: '🎙️',
+              action: { type: 'navigate', target: 'voice-control' },
+              scope: 'global'
+            },
+            {
               id: 'toggle_mode',
-              triggers: ['切换模式', 'toggle mode'],
+              triggers: ['切换模式', '传统模式', 'toggle mode'],
               description: '切换显示模式',
               icon: '🔄',
               action: { type: 'system_command', command: 'toggle_traditional_mode' },
@@ -515,9 +534,45 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
             // 先设置页面状态
             setCurrentPage(target)
             
+            // 如果切换到语音页面（不需要iframe），清除动态指令
+            if (target.startsWith('voice-') || target === 'voice-home') {
+              clearPageCommands()
+            }
+            
             // 处理需要iframe的页面
-            if (target.startsWith('http') || (!target.startsWith('voice-') && target !== 'voice-home')) {
-              await handleIframeNavigation(target)
+            const needsIframe = target.startsWith('http') || (!target.startsWith('voice-') && target !== 'voice-home')
+            console.log('🔍 iframe判断:', {
+              target,
+              startsWithHttp: target.startsWith('http'),
+              startsWithVoice: target.startsWith('voice-'),
+              isVoiceHome: target === 'voice-home',
+              needsIframe
+            })
+            
+            if (needsIframe) {
+              console.log('✅ 需要iframe，等待iframe渲染后导航')
+              
+              // 等待iframe渲染完成
+              const waitForIframe = () => {
+                return new Promise<void>((resolve) => {
+                  const checkIframe = () => {
+                    if (iframeRef.current) {
+                      console.log('✅ iframe已渲染，开始导航')
+                      resolve()
+                    } else {
+                      console.log('⏳ 等待iframe渲染...')
+                      setTimeout(checkIframe, 100)
+                    }
+                  }
+                  checkIframe()
+                })
+              }
+              
+              await waitForIframe()
+              // 简化导航，只设置iframe URL，由web端自己处理Bridge
+              await handleIframeNavigationSimple(target)
+            } else {
+              console.log('❌ 不需要iframe')
             }
             
             // 更新运行时上下文（使用Promise处理可能的异步操作）
@@ -560,6 +615,20 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
   // AI增强模式不包含样式修改功能
 
   // MatrixLoading完成回调
+  // 执行动态指令
+  const executeDynamicCommand = useCallback(async (commandId: string) => {
+    console.log('🎯 执行动态指令:', commandId)
+    
+    // 发送消息到iframe让Bridge执行指令
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({
+        type: 'execute_command',
+        commandId: commandId,
+        params: {}
+      }, '*')
+    }
+  }, [])
+
   const handleLoadingComplete = useCallback(() => {
     console.log('🎬 MatrixLoading完成，当前状态:', { isGeneratingPage, currentPage })
     setIsGeneratingPage(false)
@@ -588,6 +657,17 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
   // 渲染状态调试
   console.log('🎨 AIEnhancedView渲染:', { isGeneratingPage, currentPage })
 
+  // 渲染状态调试 - 保持语音OS的指令面板显示
+  console.log('🔍 页面状态:', { currentPage, isGeneratingPage })
+  console.log('🔍 渲染条件判断:', {
+    isVoiceHome: currentPage === 'voice-home',
+    isVoiceControl: currentPage === 'voice-control', 
+    isVoiceSettings: currentPage === 'voice-settings',
+    isVoiceWorkstudio: currentPage === 'voice-workstudio',
+    startsWithVoice: currentPage.startsWith('voice-'),
+    shouldShowIframe: !currentPage.startsWith('voice-') && currentPage !== 'voice-home' && currentPage !== 'voice-control' && currentPage !== 'voice-settings' && currentPage !== 'voice-workstudio'
+  })
+
   return (
     <ErrorBoundary>
       <div className="h-full w-full flex bg-black">      
@@ -603,25 +683,20 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
             />
           )}
         {/* 上部：语音优化页面显示区 */}
-        <div className="flex-1 relative">
-          {currentPage === 'voice-home' ? (
+        <div className="flex-1 relative overflow-hidden">
+          <div className="page-container">
+            
+            {currentPage === 'voice-home' ? (
             // 语音主页 - 不是iframe，而是本地组件
-            <div className="h-full w-full bg-gradient-to-b from-gray-900 to-black flex flex-col items-center justify-center p-8">
+            <div className="page-content h-full w-full bg-gradient-to-b from-gray-900 to-black flex flex-col items-center justify-center p-8">
               <div className="max-w-4xl w-full">
                 <div className="text-center mb-8">
                   <h1 className="text-4xl font-light text-white mb-4">Triangle OS 语音助手</h1>
                   <p className="text-xl text-gray-300 opacity-80">使用语音指令或右侧按钮控制系统</p>
                 </div>
                 
-                {/* 语音指令展示 - 与AI模式完全相同 */}
+                {/* 通用系统功能展示 */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
-                    <div className="text-2xl mb-3">💬</div>
-                    <h3 className="text-white text-lg font-medium mb-2">AI 咨询</h3>
-                    <p className="text-gray-300 text-sm mb-3">智能对话和咨询服务</p>
-                    <div className="text-blue-300 text-xs">说："打开咨询" 或 "开始咨询"</div>
-                  </div>
-                  
                   <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
                     <div className="text-2xl mb-3">⚙️</div>
                     <h3 className="text-white text-lg font-medium mb-2">系统设置</h3>
@@ -633,7 +708,7 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
                     <div className="text-2xl mb-3">🔄</div>
                     <h3 className="text-white text-lg font-medium mb-2">切换模式</h3>
                     <p className="text-gray-300 text-sm mb-3">在不同显示模式间切换</p>
-                    <div className="text-blue-300 text-xs">说："切换模式" 或 "增强模式"</div>
+                    <div className="text-blue-300 text-xs">说："切换模式" 或 "传统模式"</div>
                   </div>
                   
                   <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
@@ -641,6 +716,20 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
                     <h3 className="text-white text-lg font-medium mb-2">返回主页</h3>
                     <p className="text-gray-300 text-sm mb-3">回到语音助手主界面</p>
                     <div className="text-blue-300 text-xs">说："回到主页" 或 "主页"</div>
+                  </div>
+                  
+                  <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                    <div className="text-2xl mb-3">🛠️</div>
+                    <h3 className="text-white text-lg font-medium mb-2">指令工作室</h3>
+                    <p className="text-gray-300 text-sm mb-3">管理和查看语音指令</p>
+                    <div className="text-blue-300 text-xs">说："工作室" 或 "指令工作室"</div>
+                  </div>
+                  
+                  <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                    <div className="text-2xl mb-3">🎙️</div>
+                    <h3 className="text-white text-lg font-medium mb-2">语音控制中心</h3>
+                    <p className="text-gray-300 text-sm mb-3">通用语音指令处理系统</p>
+                    <div className="text-blue-300 text-xs">说："语音控制" 或 "控制中心"</div>
                   </div>
                   
                   <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
@@ -652,25 +741,62 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
                   
                   <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
                     <div className="text-2xl mb-3">🎯</div>
-                    <h3 className="text-white text-lg font-medium mb-2">更多功能</h3>
-                    <p className="text-gray-300 text-sm mb-3">探索其他语音功能</p>
-                    <div className="text-blue-300 text-xs">语音识别会自动发现更多指令</div>
+                    <h3 className="text-white text-lg font-medium mb-2">动态指令</h3>
+                    <p className="text-gray-300 text-sm mb-3">
+                      {dynamicCommands.length > 0 
+                        ? `${currentPageName} 页面指令 (${dynamicCommands.length}个)`
+                        : '根据加载的应用显示更多功能'
+                      }
+                    </p>
+                    {/* 调试信息 */}
+                    {process.env.NODE_ENV === 'development' && (
+                      <div className="text-yellow-300 text-xs mb-2">
+                        调试: 动态指令数={dynamicCommands.length}, 页面={currentPageName}
+                      </div>
+                    )}
+                    {dynamicCommands.length > 0 ? (
+                      <div className="space-y-2 max-h-32 overflow-y-auto">
+                        {dynamicCommands.map((cmd, index) => (
+                          <div 
+                            key={cmd.id}
+                            className="bg-blue-500 bg-opacity-20 rounded-lg p-3 cursor-pointer hover:bg-opacity-30 transition-all"
+                            onClick={() => executeDynamicCommand(cmd.id)}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-lg">{cmd.icon || '🎯'}</span>
+                              <span className="text-white text-sm font-medium">{cmd.description}</span>
+                            </div>
+                            <div className="text-blue-300 text-xs">
+                              说："{cmd.triggers?.[0] || cmd.id}"
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-blue-300 text-xs">语音识别会自动发现应用指令</div>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
-          ) : currentPage === 'voice-consult' ? (
-            // AI定制咨询页面
-            <VoiceConsultPage />
+          ) : currentPage === 'voice-control' ? (
+            // 通用语音控制中心
+            <div className="page-content">
+              <VoiceControlPage />
+            </div>
           ) : currentPage === 'voice-settings' ? (
             // AI定制设置页面
-            <VoiceSettingsPage />
+            <div className="page-content">
+              <VoiceSettingsPage />
+            </div>
           ) : currentPage === 'voice-workstudio' ? (
             // AI定制工作室页面
-            <VoiceWorkstudioPage />
+            <div className="page-content">
+              <VoiceWorkstudioPage />
+            </div>
           ) : currentPage.startsWith('voice-') ? (
             // 其他语音优化页面
-            <div className="h-full w-full bg-gradient-to-b from-gray-900 to-black flex items-center justify-center p-8">
+            <div className="page-content h-full w-full bg-gradient-to-b from-gray-900 to-black flex items-center justify-center p-8">
               <div className="text-center">
                 <h2 className="text-3xl font-light text-white mb-4">语音优化页面</h2>
                 <p className="text-gray-300">当前页面: {currentPage}</p>
@@ -683,7 +809,7 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
             </div>
           ) : (
             // 需要加载外部页面时才使用iframe
-            <>
+            <div className="page-content">
               <iframe
                 ref={iframeRef}
                 src={currentPage.startsWith('http') ? currentPage : websiteUrl + currentPage}
@@ -696,8 +822,9 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
                   <div className="text-white text-lg">执行中...</div>
                 </div>
               )}
-            </>
+            </div>
           )}
+          </div>
         </div>
         
         {/* 下部：语音显示区 */}
@@ -806,7 +933,10 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
           
           {/* 状态指示 */}
           <div className="mt-3 text-xs text-gray-500">
-            {commands.length > 0 ? `${commands.length} 个可用指令` : '正在加载指令...'}
+            {commands.length > 0 || dynamicCommands.length > 0 
+              ? `${commands.length} 个系统指令 ${dynamicCommands.length > 0 ? `+ ${dynamicCommands.length} 个页面指令` : ''}` 
+              : '正在加载指令...'
+            }
           </div>
         </div>
 
@@ -815,6 +945,43 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
           <h3 className="text-white text-sm font-medium mb-3">可用指令</h3>
           
           <div className="space-y-2">
+            {/* 动态指令区域 */}
+            {dynamicCommands.length > 0 && (
+              <>
+                <div className="text-xs text-blue-400 font-medium mb-2 flex items-center gap-2">
+                  <span>🎯</span>
+                  <span>页面指令 ({currentPageName})</span>
+                </div>
+                {dynamicCommands.map((command) => (
+                  <button
+                    key={`dynamic-${command.id}`}
+                    onClick={() => executeDynamicCommand(command.id)}
+                    disabled={loading}
+                    className="w-full p-3 bg-blue-800 bg-opacity-50 hover:bg-blue-700 hover:bg-opacity-60 disabled:bg-gray-800 disabled:opacity-50 text-left rounded-lg transition-colors border border-blue-600 border-opacity-30"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <span className="text-lg">{command.icon || '🎯'}</span>
+                      <div className="flex-1">
+                        <div className="text-white text-sm font-medium">
+                          {command.description}
+                        </div>
+                        <div className="text-blue-300 text-xs mt-1">
+                          触发词: {command.triggers?.slice(0, 2).join(', ') || command.id}
+                          {command.triggers && command.triggers.length > 2 && '...'}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+                <div className="border-t border-gray-600 my-3"></div>
+              </>
+            )}
+            
+            {/* 系统指令区域 */}
+            <div className="text-xs text-gray-400 font-medium mb-2 flex items-center gap-2">
+              <span>⚙️</span>
+              <span>系统指令</span>
+            </div>
             {commands.length > 0 ? (
               commands.map((command) => (
                 <button
@@ -860,6 +1027,80 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
     </div>
     </ErrorBoundary>
   )
+}
+
+// 页面浮现效果样式
+const pageStyles = `
+  .page-container {
+    position: relative;
+    height: 100%;
+    width: 100%;
+    perspective: 1000px;
+  }
+  
+  .page-content {
+    height: 100%;
+    width: 100%;
+    animation: pageEmerge 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+    transform-origin: center center;
+    backface-visibility: hidden;
+  }
+  
+  @keyframes pageEmerge {
+    0% {
+      opacity: 0;
+      transform: translateZ(-200px) rotateX(15deg) scale(0.8);
+      filter: blur(10px);
+    }
+    40% {
+      opacity: 0.6;
+      transform: translateZ(-100px) rotateX(8deg) scale(0.9);
+      filter: blur(5px);
+    }
+    70% {
+      opacity: 0.9;
+      transform: translateZ(-30px) rotateX(3deg) scale(0.98);
+      filter: blur(1px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateZ(0) rotateX(0deg) scale(1);
+      filter: blur(0px);
+    }
+  }
+  
+  /* 为不同页面添加轻微的浮现延迟 */
+  .page-content:nth-child(1) {
+    animation-delay: 0.1s;
+  }
+  
+  /* 增强3D透视效果 */
+  .page-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.1) 100%);
+    opacity: 0;
+    animation: shadowEmerge 1.2s ease-out forwards;
+    pointer-events: none;
+    z-index: -1;
+  }
+  
+  @keyframes shadowEmerge {
+    0% { opacity: 0.8; }
+    100% { opacity: 0; }
+  }
+`;
+
+// 注入样式到页面
+if (typeof document !== 'undefined' && !document.getElementById('page-emerge-styles')) {
+  const styleSheet = document.createElement('style');
+  styleSheet.id = 'page-emerge-styles';
+  styleSheet.textContent = pageStyles;
+  document.head.appendChild(styleSheet);
 }
 
 // Extend Window interface for TypeScript

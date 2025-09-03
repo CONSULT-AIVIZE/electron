@@ -94,6 +94,11 @@ class TriangleOSBridge {
           })
           break
           
+        case 'execute_command':
+          // 执行动态注册的指令
+          this.executeCommand(data.commandId, data.params || {})
+          break
+          
         case 'os_check_auth_status':
           // 响应OS的认证状态检查
           this.handleAuthStatusCheck(data.requestId)
