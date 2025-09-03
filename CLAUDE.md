@@ -102,3 +102,4 @@ Message history and chat sessions persist across app restarts through the backen
 
 ### iOS-Style Interface
 The current interface design uses only consultation and settings applications. Adding new apps requires updating both the Dashboard component and sidebar navigation.
+- OS侧的所有改动要通用,不能跟具体业务耦合,要形成一个规范或者协议,让App那边实现.
