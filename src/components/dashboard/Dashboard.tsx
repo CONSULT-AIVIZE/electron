@@ -24,6 +24,7 @@ const Dashboard = () => {
   const [navigationTarget, setNavigationTarget] = useState('')
   const [showAppIframe, setShowAppIframe] = useState(false)
   const [currentIframeUrl, setCurrentIframeUrl] = useState('')
+  const [iframeLoaded, setIframeLoaded] = useState(false)
 
   // Update time every second
   useEffect(() => {
@@ -44,10 +45,10 @@ const Dashboard = () => {
         
         // Show loading effect, then update iframe
         setTimeout(() => {
+          setIframeLoaded(false)
           setCurrentIframeUrl(event.detail.fullUrl)
-          setShowAppIframe(true)
-          setIsNavigating(false)
-        }, 800) // Allow time for loading animation
+          // Don't show iframe yet - wait for onLoad event
+        }, 1200) // Allow time for loading animation
       }
     }
 
@@ -64,6 +65,7 @@ const Dashboard = () => {
       console.log('[Dashboard] Navigating to home, hiding iframe')
       setShowAppIframe(false)
       setCurrentIframeUrl('')
+      setIframeLoaded(false)
     }
 
     // Listen for home navigation events
@@ -208,15 +210,21 @@ const Dashboard = () => {
       <div className="flex flex-col h-full">
         {/* 上部：页面显示区 */}
         <div className={`flex-1 relative ${showAppIframe ? '' : 'bg-gradient-to-b from-gray-900 to-black'}`}>
-          {showAppIframe && currentIframeUrl ? (
-            /* 显示应用 iframe */
+          {currentIframeUrl && (
+            /* 预加载 iframe - 只有加载完成后才显示 */
             <iframe
               src={currentIframeUrl}
-              className="w-full h-full border-0"
+              className={`w-full h-full border-0 ${!iframeLoaded ? 'opacity-0' : 'opacity-100'} transition-opacity duration-300`}
               title="CONSULT_AI Application"
               id="app-iframe"
+              onLoad={() => {
+                setIframeLoaded(true)
+                setShowAppIframe(true)
+                setIsNavigating(false)
+              }}
             />
-          ) : (
+          )}
+          {!showAppIframe && (
             /* 默认显示语音指令集页面 */
             <div className="h-full w-full flex flex-col items-center justify-center p-8">
               <div className="max-w-4xl w-full">
@@ -289,11 +297,11 @@ const Dashboard = () => {
       </div>
       
       {/* MatrixLoading 覆盖层 */}
-      {isNavigating && (
+      {(isNavigating || (currentIframeUrl && !iframeLoaded)) && (
         <div className="absolute inset-0 z-[100]">
           <MatrixLoading
-            message={`正在导航到 ${navigationTarget}`}
-            duration={800}
+            message={isNavigating ? `正在导航到 ${navigationTarget}` : '正在加载页面...'}
+            duration={isNavigating ? 1200 : 5000}
             onComplete={() => {
               console.log('[Dashboard] MatrixLoading completed')
             }}
