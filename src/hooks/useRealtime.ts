@@ -5,13 +5,14 @@ import {
   RealtimeSession,
   RealtimeAgent,
   OpenAIRealtimeWebRTC,
-} from '@openai/agents/realtime'
+} from '@openai/agents-realtime'
 
 type ConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED'
 
 interface UseRealtimeOptions {
   agent: RealtimeAgent
   onTranscript?: (text: string, isFinal: boolean) => void
+  onAiResponse?: (text: string, isFinal: boolean) => void
   onError?: (error: Error) => void
 }
 
@@ -23,11 +24,27 @@ export function useRealtime(options: UseRealtimeOptions) {
 
   const fetchEphemeralKey = useCallback(async () => {
     try {
-      const response = await fetch('/api/realtime/session')
+      const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY
+      if (!apiKey) {
+        throw new Error('OPENAI API key not configured in environment variables')
+      }
+
+      const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-realtime-preview-2024-10-01',
+          voice: 'sage'
+        })
+      })
+      
       const data = await response.json()
       
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to get session key')
+        throw new Error(data.error?.message || `HTTP ${response.status}: ${JSON.stringify(data)}`)
       }
       
       const key = data?.client_secret?.value
@@ -82,14 +99,105 @@ export function useRealtime(options: UseRealtimeOptions) {
       })
 
       // Log all events for debugging
-      session.on('transport_event', (event: any) => {
-        console.log('[Realtime Event Received]:', event.type, event)
+      session.on('transport_event', async (event: any) => {
+        console.log('[Realtime Event]:', event.type, event)
         
-        if (event.type === 'conversation.item.input_audio_transcription.completed') {
+        // Handle transcript events
+        if (event.type === 'input_audio_transcription.completed') {
           const transcript = event.transcript
           if (transcript) {
+            console.log('[User Transcript Completed]:', transcript)
             setLastTranscript(transcript)
             options.onTranscript?.(transcript, true)
+          }
+        } else if (event.type === 'input_audio_transcription.failed') {
+          console.error('[Transcript Failed]:', event.error)
+        } else if (event.type === 'conversation.item.created') {
+          // Handle both user and assistant messages
+          const content = event.item?.content
+          if (event.item?.role === 'user' && Array.isArray(content)) {
+            for (const c of content) {
+              if (c.type === 'input_audio' && c.transcript) {
+                console.log('[User Audio Transcript]:', c.transcript)
+                setLastTranscript(c.transcript)
+                options.onTranscript?.(c.transcript, true)
+              } else if (c.type === 'input_text' && c.text) {
+                console.log('[User Text Input]:', c.text)
+                setLastTranscript(c.text)
+                options.onTranscript?.(c.text, true)
+              }
+            }
+          } else if (event.item?.role === 'assistant' && Array.isArray(content)) {
+            for (const c of content) {
+              if (c.type === 'audio' && c.transcript) {
+                console.log('[AI Audio Response]:', c.transcript)
+                options.onAiResponse?.(c.transcript, true)
+              } else if (c.type === 'text' && c.text) {
+                console.log('[AI Text Response]:', c.text)
+                options.onAiResponse?.(c.text, true)
+              }
+            }
+          }
+        } else if (event.type === 'output_audio_buffer.stopped') {
+          // AI finished speaking
+          console.log('[AI Audio Stopped]')
+        } else if (event.type === 'conversation.item.input_audio_transcription.completed') {
+          // Alternative transcript event
+          const transcript = event.transcript
+          if (transcript) {
+            console.log('[Alt User Transcript]:', transcript)
+            setLastTranscript(transcript)
+            options.onTranscript?.(transcript, true)
+          }
+        } else if (event.type.includes('function_call') || event.type.includes('tool_calls')) {
+          // Handle function call events (multiple possible event types)
+          console.log('[Function Call Event]:', event.type, event)
+          
+          // Try different event structures
+          let functionCall = null
+          if (event.call) {
+            functionCall = event.call
+          } else if (event.item && event.item.tool_calls) {
+            functionCall = event.item.tool_calls[0]
+          } else if (event.tool_call) {
+            functionCall = event.tool_call
+          }
+          
+          if (functionCall && functionCall.name) {
+            console.log('[Executing Tool]:', functionCall.name, 'args:', functionCall.arguments)
+            
+            // Find and execute the corresponding tool
+            const tool = options.agent.tools?.find((t: any) => t.name === functionCall.name)
+            if (tool && tool.execute) {
+              try {
+                const args = functionCall.arguments ? JSON.parse(functionCall.arguments) : {}
+                const result = await tool.execute(args)
+                console.log('[Tool Result]:', result)
+                
+                // Send tool result back to OpenAI
+                transportRef.current?.sendEvent({
+                  type: 'conversation.item.create',
+                  item: {
+                    type: 'function_call_output',
+                    call_id: functionCall.call_id,
+                    output: JSON.stringify(result)
+                  }
+                })
+              } catch (error) {
+                console.error('[Tool Execution Error]:', error)
+                // Send error back to OpenAI
+                transportRef.current?.sendEvent({
+                  type: 'conversation.item.create',
+                  item: {
+                    type: 'function_call_output',
+                    call_id: functionCall.call_id,
+                    output: JSON.stringify({ error: error.message })
+                  }
+                })
+              }
+            } else {
+              console.error('[Tool Not Found]:', functionCall.name)
+            }
           }
         }
       })
@@ -102,6 +210,7 @@ export function useRealtime(options: UseRealtimeOptions) {
       session.on('agent_tool_end', (details: any, agent: any, functionCall: any, result: any) => {
         console.log('[Tool End]:', functionCall.name, 'result:', result, 'details:', details)
       })
+
 
       // History events
       session.on('history_added', (item: any) => {
@@ -123,12 +232,22 @@ export function useRealtime(options: UseRealtimeOptions) {
       setStatus('CONNECTED')
       console.log('Connected successfully')
 
-      // Manually update session with agent configuration to ensure instructions are applied
+      // Manually update session with agent configuration and enable transcription
       const sessionUpdate = {
         type: 'session.update',
         session: {
           instructions: options.agent.instructions,
           voice: options.agent.voice,
+          input_audio_transcription: {
+            model: 'whisper-1'
+          },
+          turn_detection: {
+            type: 'server_vad',
+            threshold: 0.5,
+            prefix_padding_ms: 300,
+            silence_duration_ms: 500,
+            create_response: true
+          },
           tools: options.agent.tools?.map((tool: any) => ({
             type: 'function',
             name: tool.name,

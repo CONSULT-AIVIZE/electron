@@ -46,7 +46,8 @@
       "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
       "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
       "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(pkill:*)"
     ],
     "deny": [],
     "ask": []

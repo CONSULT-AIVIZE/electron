@@ -150,70 +150,25 @@ export class RuntimeService {
   }
 
   /**
-   * 解析协议指令
+   * 解析协议指令 - 直接从 protocol.json 读取
    */
   private async parseProtocolCommands(protocol: any, websiteUrl: string) {
     console.log('🔍 解析协议指令:', protocol)
     
-    // 全局指令
-    if (protocol.commands?.global) {
-      try {
-        // 如果global是字符串（文件路径），需要加载文件
-        if (typeof protocol.commands.global === 'string') {
-          const globalCommandsUrl = `${websiteUrl}/api/${protocol.commands.global}`
-          console.log('📥 加载全局指令文件:', globalCommandsUrl)
-          
-          const response = await fetch(globalCommandsUrl)
-          if (response.ok) {
-            const globalCommandsData = await response.json()
-            const globalCommands = globalCommandsData.commands.map((cmd: any) => ({
-              ...cmd,
-              scope: 'global',
-              app_id: this.currentApp?.id
-            }))
-            this.commands.set('global', globalCommands)
-            console.log('✅ 全局指令加载成功:', globalCommands.length, '个指令')
-          }
-        } else if (Array.isArray(protocol.commands.global)) {
-          // 如果global是数组，直接使用
-          const globalCommands = protocol.commands.global.map((cmd: any) => ({
-            ...cmd,
-            scope: 'global',
-            app_id: this.currentApp?.id
-          }))
-          this.commands.set('global', globalCommands)
-        }
-      } catch (error) {
-        console.error('❌ 加载全局指令失败:', error)
-      }
-    }
-
-    // 页面特定指令
-    if (protocol.commands?.pages) {
-      for (const [pageId, pageCommandPath] of Object.entries(protocol.commands.pages)) {
-        try {
-          // 页面指令也是文件路径
-          if (typeof pageCommandPath === 'string') {
-            const pageCommandsUrl = `${websiteUrl}/api/${pageCommandPath}`
-            console.log(`📥 加载页面指令文件 [${pageId}]:`, pageCommandsUrl)
-            
-            const response = await fetch(pageCommandsUrl)
-            if (response.ok) {
-              const pageCommandsData = await response.json()
-              const commands = pageCommandsData.commands.map((cmd: any) => ({
-                ...cmd,
-                scope: 'page',
-                page_id: pageId,
-                app_id: this.currentApp?.id
-              }))
-              this.commands.set(`page:${pageId}`, commands)
-              console.log(`✅ 页面指令加载成功 [${pageId}]:`, commands.length, '个指令')
-            }
-          }
-        } catch (error) {
-          console.error(`❌ 加载页面指令失败 [${pageId}]:`, error)
-        }
-      }
+    // 直接使用 commands 数组
+    if (Array.isArray(protocol.commands)) {
+      const globalCommands = protocol.commands.map((cmd: any) => ({
+        ...cmd,
+        scope: 'global',
+        app_id: this.currentApp?.id
+      }))
+      this.commands.set('global', globalCommands)
+      console.log('✅ 从 protocol.json 直接加载指令成功:', globalCommands.length, '个指令')
+      
+      // 重要：通知监听器指令已更新
+      this.notifyListeners()
+    } else {
+      console.warn('⚠️ protocol.json 中未找到 commands 数组')
     }
   }
 
@@ -316,11 +271,48 @@ export class RuntimeService {
   }
 
   private async executeNavigate(action: RuntimeAction): Promise<boolean> {
+    // For iframe context (AI enhanced mode) - use postMessage
     if (this.context?.iframe) {
       this.context.iframe.contentWindow?.postMessage({
         type: 'os_navigate',
         url: action.target
       }, '*')
+    } 
+    // For Voice commands - emit navigation event to update iframe in Dashboard
+    else if (this.currentApp) {
+      // Add Triangle OS mode parameter to hide sidebar and simplify UI
+      const triangleOSParams = new URLSearchParams()
+      triangleOSParams.set('triangle_os', 'true')
+      
+      const fullUrl = `${this.currentApp.url}${action.target}?${triangleOSParams.toString()}`
+      
+      // Emit navigation event to update iframe instead of full page navigation
+      const navigationEvent = new CustomEvent('os_iframe_navigation', {
+        detail: {
+          type: 'iframe_navigation',
+          appUrl: this.currentApp.url,
+          targetPath: action.target,
+          fullUrl: fullUrl
+        }
+      })
+      
+      console.log('[RuntimeService] Emitting iframe navigation event with Triangle OS mode:', navigationEvent.detail)
+      window.dispatchEvent(navigationEvent)
+    }
+    // Fallback to direct navigation only when no app is loaded
+    else {
+      // Import navigation utilities dynamically to avoid circular dependencies
+      const { navigateToRoute, isElectronProduction } = await import('../../utils/electronNavigation')
+      
+      if (isElectronProduction()) {
+        navigateToRoute(action.target)
+      } else {
+        // In development, we need access to Next.js router
+        // This will be handled by the calling component
+        if (typeof window !== 'undefined') {
+          window.location.href = action.target
+        }
+      }
     }
     
     if (this.context) {
@@ -496,6 +488,12 @@ export class RuntimeService {
       }
 
       // 对于非Firebase认证，回退到服务器端检查
+      if (!this.authConfig.check_endpoint) {
+        console.warn('⚠️ 未配置 check_endpoint，跳过服务器认证检查')
+        this.authStatus = { authenticated: true } // 默认认为已认证
+        return this.authStatus
+      }
+      
       const checkUrl = `${this.currentApp.url}${this.authConfig.check_endpoint}`
       const response = await fetch(checkUrl, {
         method: 'GET',

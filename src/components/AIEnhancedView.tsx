@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { RuntimeService, RuntimeCommand, AppConfig } from '../core/runtime/RuntimeService'
+import { getSharedRuntimeService } from '../core/runtime/sharedRuntime'
 import MatrixLoading from './MatrixLoading'
 import VoiceControlPage from './voice-pages/VoiceControlPage'
 import VoiceSettingsPage from './voice-pages/VoiceSettingsPage'
@@ -16,7 +17,7 @@ interface AIEnhancedViewProps {
 }
 
 const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, onToggleMode }) => {
-  const [runtimeService] = useState(() => new RuntimeService())
+  const runtimeService = getSharedRuntimeService() // 使用共享的 RuntimeService
   const [commands, setCommands] = useState<RuntimeCommand[]>([])
   const [currentPage, setCurrentPage] = useState('voice-home') // 默认显示语音主页
   const [loading, setLoading] = useState(false)

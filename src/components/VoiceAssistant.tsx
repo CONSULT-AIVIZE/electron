@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { RuntimeService } from '../core/runtime/RuntimeService'
 import type { RuntimeCommand } from '../core/runtime/RuntimeService'
+import { getSharedRuntimeService } from '../core/runtime/sharedRuntime'
 import { appRegistry } from '../core/config/appConfig'
 import { getStartupAppConfig, initializeDefaultApps } from '../core/config/defaultApps'
 
@@ -19,7 +20,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ className = '' }) => {
   const [transcript, setTranscript] = useState('')
   const [error, setError] = useState('')
   const [availableCommands, setAvailableCommands] = useState<RuntimeCommand[]>([])
-  const [runtimeService] = useState(() => new RuntimeService())
+  const runtimeService = getSharedRuntimeService() // 使用共享的 RuntimeService
   
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null)

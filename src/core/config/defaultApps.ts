@@ -17,6 +17,13 @@ export const initializeDefaultApps = async (): Promise<void> => {
   const DEFAULT_APP_NAME = process.env.NEXT_PUBLIC_DEFAULT_APP_NAME || 'Aivize.ai 智能咨询'
   
   try {
+    // 先检查是否已经有注册的应用，避免重复注册
+    const existingApps = appRegistry.getAll()
+    if (existingApps.length > 0) {
+      console.log('✅ 发现已注册的应用，跳过初始化:', existingApps.map(app => app.name))
+      return
+    }
+    
     // 尝试动态发现并注册应用
     const discoveredApp = await registerAppFromUrl(DEFAULT_APP_URL)
     
