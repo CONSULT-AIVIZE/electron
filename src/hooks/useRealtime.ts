@@ -10,7 +10,7 @@ import {
 type ConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED'
 
 interface UseRealtimeOptions {
-  agent: RealtimeAgent
+  agent: RealtimeAgent | null
   onTranscript?: (text: string, isFinal: boolean) => void
   onAiResponse?: (text: string, isFinal: boolean) => void
   onError?: (error: Error) => void
@@ -62,6 +62,12 @@ export function useRealtime(options: UseRealtimeOptions) {
   const connect = useCallback(async (audioElement: HTMLAudioElement) => {
     if (sessionRef.current) {
       console.log('Already connected')
+      return
+    }
+
+    if (!options.agent) {
+      console.error('Cannot connect: agent is null')
+      options.onError?.(new Error('Agent not initialized'))
       return
     }
 
@@ -167,7 +173,7 @@ export function useRealtime(options: UseRealtimeOptions) {
             console.log('[Executing Tool]:', functionCall.name, 'args:', functionCall.arguments)
             
             // Find and execute the corresponding tool
-            const tool = options.agent.tools?.find((t: any) => t.name === functionCall.name)
+            const tool = options.agent?.tools?.find((t: any) => t.name === functionCall.name)
             if (tool && tool.execute) {
               try {
                 const args = functionCall.arguments ? JSON.parse(functionCall.arguments) : {}
@@ -236,16 +242,16 @@ export function useRealtime(options: UseRealtimeOptions) {
       const sessionUpdate = {
         type: 'session.update',
         session: {
-          instructions: options.agent.instructions,
-          voice: options.agent.voice,
+          instructions: options.agent?.instructions || 'You are a helpful voice assistant.',
+          voice: options.agent?.voice || 'sage',
           input_audio_transcription: {
             model: 'whisper-1'
           },
           turn_detection: {
             type: 'server_vad',
-            threshold: 0.5,
+            threshold: 0.8, // 提高阈值防止误触发
             prefix_padding_ms: 300,
-            silence_duration_ms: 500,
+            silence_duration_ms: 800, // 增加静音时长要求
             create_response: true
           },
           tools: options.agent.tools?.map((tool: any) => ({
@@ -265,7 +271,7 @@ export function useRealtime(options: UseRealtimeOptions) {
       setStatus('DISCONNECTED')
       options.onError?.(error as Error)
     }
-  }, [options, fetchEphemeralKey])
+  }, [options.agent, options.onError, options.onTranscript, options.onAiResponse, fetchEphemeralKey])
 
   const disconnect = useCallback(() => {
     if (sessionRef.current) {

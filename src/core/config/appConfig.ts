@@ -7,7 +7,7 @@
 export interface AppConfig {
   id: string
   name: string
-  url: string
+  url: string // 支持占位符，如 /project/{projectId}/chat/{chatId}
   type: 'website' | 'spa' | 'desktop'
   icon?: string
   description?: string
@@ -17,6 +17,12 @@ export interface AppConfig {
     ai_styling?: boolean
     traditional_mode?: boolean
     adaptive_ui?: boolean
+  }
+  // 页面参数配置
+  params?: {
+    required?: string[] // 必需的context参数
+    optional?: string[] // 可选的context参数
+    defaults?: Record<string, any> // 默认参数值
   }
 }
 
@@ -59,6 +65,69 @@ class AppRegistry {
    */
   has(appId: string): boolean {
     return this.apps.has(appId)
+  }
+
+  /**
+   * 解析应用URL，使用NavigationContext替换占位符
+   */
+  resolveAppUrl(appId: string, context?: Record<string, any>): { url: string; missing: string[] } {
+    const app = this.get(appId)
+    if (!app) {
+      throw new Error(`App not found: ${appId}`)
+    }
+
+    const result = { url: app.url, missing: [] as string[] }
+    
+    // 检查必需参数
+    if (app.params?.required) {
+      const missing = app.params.required.filter(param => {
+        const value = context?.[param]
+        return value === undefined || value === null
+      })
+      
+      if (missing.length > 0) {
+        result.missing = missing
+        console.warn(`⚠️ [AppRegistry] Missing required parameters for ${appId}:`, missing)
+      }
+    }
+    
+    // 使用默认值补充缺失的可选参数
+    const finalContext = { ...app.params?.defaults, ...context }
+    
+    // 替换占位符
+    result.url = this.replacePlaceholders(app.url, finalContext)
+    
+    return result
+  }
+
+  /**
+   * 替换URL中的占位符
+   */
+  private replacePlaceholders(url: string, context: Record<string, any> = {}): string {
+    let resolvedUrl = url
+    
+    // 匹配 {key} 格式的占位符
+    const placeholderRegex = /\{([^}]+)\}/g
+    const matches = url.match(placeholderRegex)
+    
+    if (!matches) {
+      return resolvedUrl
+    }
+
+    for (const match of matches) {
+      const key = match.slice(1, -1) // 移除 {} 
+      const value = context[key]
+      
+      if (value !== undefined && value !== null) {
+        resolvedUrl = resolvedUrl.replace(match, encodeURIComponent(String(value)))
+        console.log(`🔗 [AppRegistry] Resolved placeholder ${match} -> ${value}`)
+      } else {
+        console.warn(`⚠️ [AppRegistry] Placeholder ${match} not found in context`)
+        // 保留占位符，不替换
+      }
+    }
+    
+    return resolvedUrl
   }
 }
 

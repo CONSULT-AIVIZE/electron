@@ -48,8 +48,51 @@ export const initializeDefaultApps = async (): Promise<void> => {
         }
       }
       
+      // 注册示例项目相关页面（使用占位符）
+      const projectPageConfig: AppConfig = {
+        id: 'project-detail',
+        name: '项目详情',
+        url: '/project/{projectId}',
+        type: 'spa',
+        icon: '📋',
+        description: '查看特定项目的详细信息',
+        params: {
+          required: ['projectId'],
+          optional: ['tab'],
+          defaults: { tab: 'overview' }
+        },
+        features: {
+          voice_control: true,
+          ai_styling: true
+        }
+      }
+      
+      // 注册聊天页面配置（使用多个占位符）
+      const chatPageConfig: AppConfig = {
+        id: 'project-chat',
+        name: '项目咨询',
+        url: '/project/{projectId}/chat/{chatId}',
+        type: 'spa',
+        icon: '💬',
+        description: '特定项目的AI咨询会话',
+        params: {
+          required: ['projectId', 'chatId'],
+          optional: ['mode'],
+          defaults: { mode: 'guided' }
+        },
+        features: {
+          voice_control: true,
+          ai_styling: true
+        }
+      }
+      
       appRegistry.register(fallbackConfig)
+      appRegistry.register(projectPageConfig)
+      appRegistry.register(chatPageConfig)
+      
       console.log('✅ 注册后备应用配置:', fallbackConfig.name)
+      console.log('✅ 注册项目页面配置:', projectPageConfig.name)
+      console.log('✅ 注册聊天页面配置:', chatPageConfig.name)
     }
     
   } catch (error) {

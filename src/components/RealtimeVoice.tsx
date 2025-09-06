@@ -27,6 +27,7 @@ const RealtimeVoice: React.FC<RealtimeVoiceProps> = ({
   const [aiResponse, setAiResponse] = useState('')
   const [isUserSpeaking, setIsUserSpeaking] = useState(false)
   const [isAiSpeaking, setIsAiSpeaking] = useState(false)
+  const [lastToolsHash, setLastToolsHash] = useState('')
   
   const handleTranscript = useCallback((text: string, isFinal: boolean) => {
     console.log('[RealtimeVoice] User Transcript:', text, 'Final:', isFinal)
@@ -66,7 +67,7 @@ const RealtimeVoice: React.FC<RealtimeVoiceProps> = ({
   }, [])
   
   const realtime = useRealtime({
-    agent: agent!,
+    agent: agent || null,
     onTranscript: handleTranscript,
     onAiResponse: handleAiResponse,
     onError: (error) => {
@@ -86,6 +87,11 @@ const RealtimeVoice: React.FC<RealtimeVoiceProps> = ({
         instructions: `You are the TriangleOS voice assistant. You help users navigate the system and execute commands.
 
 IMPORTANT: You MUST use the appropriate tool when the user asks to perform an action.
+
+CHAT/MESSAGE HANDLING:
+- When user wants to send a message or chat content, use the guided_chat_send tool with userInput parameter
+- For example: "帮我调研下COLOX的供应商" -> use guided_chat_send tool with userInput: "帮我调研下COLOX的供应商"
+- The system will automatically add this to the chat input and send it
 
 Respond in Chinese by default, but understand both Chinese and English.
 Keep responses brief and action-oriented.
@@ -112,18 +118,35 @@ ALWAYS use the appropriate tool - do not just describe what you would do.`,
     const handleCommandsUpdate = (commands: any[]) => {
       console.log('[RealtimeVoice] Commands updated, updating tools without reconnection', commands.length)
       
+      // Create a hash of the commands to detect actual changes
+      const commandsHash = commands.map(c => `${c.id}-${c.triggers.join(',')}`).sort().join('|')
+      if (commandsHash === lastToolsHash) {
+        console.log('[RealtimeVoice] Tools unchanged, skipping session.update')
+        return
+      }
+      setLastToolsHash(commandsHash)
+      
       // Create new tools from commands inline to avoid dependency issues
-      const newTools = commands.map(command => tool({
-        name: command.id,
-        description: `${command.description}. Use when user says: ${command.triggers.join(', ')}`,
-        parameters: z.object({
-          params: z.any().optional().describe('Optional parameters for the command')
-        }),
-        execute: async (args) => {
+      const newTools = commands.map(command => {
+        try {
+          return tool({
+            name: command.id,
+            description: `${command.description}. Use when user says: ${command.triggers.join(', ')}`,
+            parameters: z.object({
+              params: z.any().nullable().optional().describe('Optional parameters for the command'),
+              userInput: z.string().nullable().optional().describe('User spoken content to be sent as message (for chat/send commands)')
+            }),
+            execute: async (args) => {
           console.log(`[Tool Execute] ${command.id}:`, command.description, args)
           
+          // Prepare parameters including user input for chat commands
+          const commandParams = {
+            ...args.params,
+            userInput: args.userInput // Include user spoken content
+          }
+          
           // Directly use RuntimeService to execute the command
-          const success = await runtimeService.executeCommand(command, args.params)
+          const success = await runtimeService.executeCommand(command, commandParams)
           
           if (success) {
             return `已执行: ${command.description}`
@@ -131,7 +154,12 @@ ALWAYS use the appropriate tool - do not just describe what you would do.`,
             return `执行失败: ${command.description}`
           }
         }
-      }))
+      })
+        } catch (error) {
+          console.error(`[RealtimeVoice] Failed to create tool for ${command.id}:`, error)
+          return null
+        }
+      }).filter(t => t !== null)
       
       console.log(`[RealtimeVoice] Created ${newTools.length} tools from commands:`, newTools.map(t => t.name))
       
@@ -150,6 +178,11 @@ ALWAYS use the appropriate tool - do not just describe what you would do.`,
 
 IMPORTANT: You MUST use the appropriate tool when the user asks to perform an action.
 
+CHAT/MESSAGE HANDLING:
+- When user wants to send a message or chat content, use the guided_chat_send tool with userInput parameter
+- For example: "帮我调研下COLOX的供应商" -> use guided_chat_send tool with userInput: "帮我调研下COLOX的供应商"
+- The system will automatically add this to the chat input and send it
+
 Available tools and their triggers:
 ${newTools.map((t: any) => `- ${t.name}: ${t.description}`).join('\n')}
 
@@ -166,6 +199,7 @@ ALWAYS use the appropriate tool - do not just describe what you would do.`,
         }
         
         realtime.sendEvent(sessionUpdate)
+        setLastToolsHash(commandsHash) // 更新hash以保持同步
         console.log('[RealtimeVoice] Session update sent with tools:', newTools.length)
       } else {
         console.log('[RealtimeVoice] Not connected yet, tools will be updated when connection is established')
@@ -189,52 +223,36 @@ ALWAYS use the appropriate tool - do not just describe what you would do.`,
     return () => {
       runtimeService.removeListener(handleCommandsUpdate)
     }
-  }, [agent, runtimeService]) // Removed createToolsFromCommands and realtime from dependencies
+  }, [agent, runtimeService, lastToolsHash]) // Added lastToolsHash to detect changes
   
   // Auto-connect when component mounts and agent is initialized
   useEffect(() => {
     if (audioRef.current && agent && isInitialized && realtime.status === 'DISCONNECTED') {
-      // Small delay to ensure component is fully mounted
+      // Ensure agent is fully ready with tools before connecting
+      const currentCommands = runtimeService.getCurrentCommands()
+      
+      // Small delay to ensure component is fully mounted and tools are ready
       const timer = setTimeout(() => {
-        console.log('[RealtimeVoice] Auto-connecting to OpenAI Realtime...')
+        console.log('[RealtimeVoice] Auto-connecting to OpenAI Realtime...', {
+          hasAgent: !!agent,
+          isInitialized,
+          status: realtime.status,
+          commandsCount: currentCommands.length
+        })
         realtime.connect(audioRef.current!)
-      }, 1000)
+      }, 1500) // Increased delay to ensure everything is ready
       
       return () => clearTimeout(timer)
     }
-  }, [agent, isInitialized, realtime, audioRef.current])
+  }, [agent, isInitialized, realtime.status, runtimeService])
 
-  // When connection is established, update tools if available
+  // When connection is established, just log - tools are updated by handleCommandsUpdate
   useEffect(() => {
-    if (realtime.status === 'CONNECTED' && agent && agent.tools.length > 0) {
-      console.log('[RealtimeVoice] Connection established, updating session with existing tools:', agent.tools.length)
-      
-      const sessionUpdate = {
-        type: 'session.update',
-        session: {
-          instructions: `You are the TriangleOS voice assistant. You help users navigate the system and execute commands.
-
-IMPORTANT: You MUST use the appropriate tool when the user asks to perform an action.
-
-Available tools and their triggers:
-${agent.tools.map((t: any) => `- ${t.name}: ${t.description}`).join('\n')}
-
-Respond in Chinese by default, but understand both Chinese and English.
-Keep responses brief and action-oriented.
-ALWAYS use the appropriate tool - do not just describe what you would do.`,
-          tools: agent.tools.map((tool: any) => ({
-            type: 'function',
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.parameters
-          }))
-        }
-      }
-      
-      realtime.sendEvent(sessionUpdate)
-      console.log('[RealtimeVoice] Initial session update sent with tools:', agent.tools.length)
+    if (realtime.status === 'CONNECTED') {
+      console.log('[RealtimeVoice] Connection established, tools will be updated by command listener')
     }
-  }, [realtime.status, agent, realtime])
+  }, [realtime.status])
+
   
   const handleToggle = useCallback(() => {
     if (realtime.status === 'CONNECTED') {

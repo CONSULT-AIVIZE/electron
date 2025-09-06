@@ -1,304 +1,171 @@
 'use client'
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 
-interface MatrixLoadingProps {
+interface CodeGenerationLoadingProps {
   message?: string
   onComplete?: () => void
-  duration?: number // 持续时间，毫秒
-  minDuration?: number // 最小显示时间，确保用户看到效果
+  duration?: number
+  minDuration?: number
 }
 
-const MatrixLoading: React.FC<MatrixLoadingProps> = ({ 
+const CodeGenerationLoading: React.FC<CodeGenerationLoadingProps> = ({ 
   message = "AI正在生成页面...", 
   onComplete, 
   duration = 3000,
   minDuration = 2000
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const animationRef = useRef<number>()
+  const [currentStep, setCurrentStep] = useState(0)
+  const [currentCode, setCurrentCode] = useState('')
+  
+  const codeSteps = [
+    'import React from "react"',
+    'import { useState, useEffect } from "react"',
+    'const Component = () => {',
+    '  const [loading, setLoading] = useState(true)',
+    '  const [data, setData] = useState(null)',
+    '',
+    '  useEffect(() => {',
+    '    fetchData().then(response => {',
+    '      setData(response)',
+    '      setLoading(false)',
+    '    })',
+    '  }, [])',
+    '',
+    '  if (loading) return <Loading />',
+    '',
+    '  return (',
+    '    <div className="container">',
+    '      <h1>Welcome to Triangle OS</h1>',
+    '      <div className="content">',
+    '        {data && <DataView data={data} />}',
+    '      </div>',
+    '    </div>',
+    '  )',
+    '}',
+    '',
+    'export default Component'
+  ]
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    // 设置画布大小 - 使用父容器大小而不是整个窗口
-    const resizeCanvas = () => {
-      const parent = canvas.parentElement
-      if (parent) {
-        canvas.width = parent.clientWidth
-        canvas.height = parent.clientHeight
+    let lineIndex = 0
+    const typeInterval = setInterval(() => {
+      if (lineIndex < codeSteps.length) {
+        setCurrentCode(prev => prev + codeSteps[lineIndex] + '\n')
+        setCurrentStep(lineIndex)
+        lineIndex++
       } else {
-        // 回退到窗口大小
-        canvas.width = window.innerWidth
-        canvas.height = window.innerHeight
+        clearInterval(typeInterval)
       }
-    }
-    resizeCanvas()
-    window.addEventListener('resize', resizeCanvas)
+    }, 80)
 
-    // Matrix代码雨字符
-    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789@#$%^&*()_+-=[]{}|;':\",./<>?`~"
-    const charArray = chars.split('')
-
-    const fontSize = 14
-    const columns = Math.floor(canvas.width / fontSize)
-    
-    // 每列的当前位置和字符池
-    const drops: number[] = []
-    const charPool: string[][] = []
-    
-    // 初始化每列的字符池，减少随机性导致的抖动
-    for (let x = 0; x < columns; x++) {
-      drops[x] = Math.floor(Math.random() * canvas.height / fontSize)
-      charPool[x] = []
-      // 为每列预生成字符序列
-      for (let y = 0; y < Math.ceil(canvas.height / fontSize) + 20; y++) {
-        charPool[x][y] = charArray[Math.floor(Math.random() * charArray.length)]
-      }
-    }
-
-    // 绘制函数
-    const draw = () => {
-      // 半透明黑色背景，产生拖尾效果
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.04)'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-      // 设置固定的字体避免抖动
-      ctx.font = `${fontSize}px 'Courier New', monospace`
-      ctx.textAlign = 'left'
-      ctx.textBaseline = 'top'
-
-      // 绘制每列的字符
-      for (let i = 0; i < drops.length; i++) {
-        const x = i * fontSize
-        const y = drops[i] * fontSize
-        
-        // 使用预生成的字符减少随机性
-        const charIndex = Math.floor(drops[i]) % charPool[i].length
-        const text = charPool[i][charIndex] || '0'
-        
-        // 顶部字符更亮
-        if (drops[i] < 5) {
-          ctx.fillStyle = '#ffffff'
-        } else if (drops[i] < 10) {
-          ctx.fillStyle = '#00ff88'
-        } else {
-          ctx.fillStyle = '#00cc55'
-        }
-        
-        // 使用整数坐标避免字符抖动
-        ctx.fillText(text, Math.floor(x), Math.floor(y))
-
-        // 重置条件优化，避免太频繁的重置
-        if (drops[i] * fontSize > canvas.height + fontSize * 10 && Math.random() > 0.975) {
-          drops[i] = -Math.floor(Math.random() * 20)
-          // 重新生成这一列的字符
-          for (let k = 0; k < charPool[i].length; k++) {
-            if (Math.random() > 0.7) { // 只更新部分字符
-              charPool[i][k] = charArray[Math.floor(Math.random() * charArray.length)]
-            }
-          }
-        }
-        
-        drops[i] += 0.8 // 加快下降速度
-      }
-    }
-
-    // 动画循环
-    const animate = () => {
-      draw()
-      animationRef.current = requestAnimationFrame(animate)
-    }
-    animate()
-
-    // 确保在动画完成后调用onComplete
     const effectiveDuration = Math.max(duration, minDuration)
-    console.log('🕒 MatrixLoading: 设置完成回调，时长:', effectiveDuration)
-    
     const completeTimeout = setTimeout(() => {
-      console.log('✅ MatrixLoading: 执行完成回调，调用onComplete')
-      try {
-        if (onComplete) {
-          onComplete()
-          console.log('✅ MatrixLoading: onComplete调用成功')
-        } else {
-          console.warn('⚠️ MatrixLoading: onComplete为空')
-        }
-      } catch (error) {
-        console.error('❌ MatrixLoading: onComplete调用失败:', error)
+      if (onComplete) {
+        onComplete()
       }
     }, effectiveDuration)
 
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
-      if (completeTimeout) {
-        clearTimeout(completeTimeout)
-      }
-      window.removeEventListener('resize', resizeCanvas)
+      clearInterval(typeInterval)
+      clearTimeout(completeTimeout)
     }
   }, [duration, minDuration, onComplete])
 
   return (
-    <div className="absolute inset-0 bg-black z-50 flex flex-col">
-      <canvas 
-        ref={canvasRef}
-        className="absolute inset-0"
-        style={{ background: 'black' }}
-      />
-      
-      {/* 简洁的加载界面覆盖层 */}
-      <div className="matrix-loading-container">
-        {/* AI标题 */}
-        <div className="matrix-title">
-          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-          <span className="matrix-title-text">TRIANGLE OS AI</span>
-          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-        </div>
-        
-        {/* 居中的进度条 */}
-        <div className="matrix-progress-bar">
-          <div className="matrix-progress-fill matrix-progress-animate" />
-        </div>
-        
-        {/* 代码生成提示 */}
-        <div className="matrix-code-status">
-          <div className="matrix-status-line matrix-status-1">
-            <span className="status-prompt">&gt;</span>
-            <span className="status-text">Loading large language model...</span>
+    <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-black to-gray-900 z-50 flex flex-col items-center justify-center">
+      {/* 背景动态效果 */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-green-500/5 rounded-full blur-3xl animate-pulse" style={{animationDelay: '1s'}}></div>
+      </div>
+
+      <div className="relative z-10 max-w-4xl w-full px-8">
+        {/* 标题区域 */}
+        <div className="text-center mb-12">
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <div className="w-3 h-3 bg-emerald-400 rounded-full animate-pulse"></div>
+            <h1 className="text-2xl font-light text-white tracking-wide">TRIANGLE OS</h1>
+            <div className="w-3 h-3 bg-emerald-400 rounded-full animate-pulse"></div>
           </div>
-          <div className="matrix-status-line matrix-status-2">
-            <span className="status-prompt">&gt;</span>
-            <span className="status-text">AI generating interface code...</span>
+          <p className="text-gray-400">AI 正在生成界面代码...</p>
+        </div>
+
+        {/* 代码编辑器模拟 */}
+        <div className="bg-gray-900/80 backdrop-blur-sm border border-gray-700/50 rounded-lg overflow-hidden shadow-2xl">
+          {/* 编辑器标题栏 */}
+          <div className="flex items-center px-4 py-3 bg-gray-800/60 border-b border-gray-700/50">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+              <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+            </div>
+            <div className="flex-1 text-center">
+              <span className="text-gray-400 text-sm font-mono">component.tsx</span>
+            </div>
           </div>
-          <div className="matrix-status-line matrix-status-3">
-            <span className="status-prompt">&gt;</span>
-            <span className="status-text">Code compilation complete...</span>
+
+          {/* 代码区域 */}
+          <div className="p-6 font-mono text-sm leading-relaxed min-h-[400px] max-h-[500px] overflow-hidden">
+            <pre className="text-gray-300 whitespace-pre-wrap">
+              {currentCode.split('\n').map((line, index) => (
+                <div key={index} className={`${index === currentStep ? 'bg-blue-500/20 animate-pulse' : ''} min-h-[1.5em]`}>
+                  <span className="text-gray-600 mr-4 select-none">{(index + 1).toString().padStart(2, '0')}</span>
+                  <span className={getLineColor(line)}>{line || ' '}</span>
+                  {index === currentStep && (
+                    <span className="animate-pulse text-emerald-400">|</span>
+                  )}
+                </div>
+              ))}
+            </pre>
+          </div>
+        </div>
+
+        {/* 状态指示器 */}
+        <div className="flex items-center justify-center mt-8 gap-8">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+            <span className="text-gray-400 text-sm">正在生成组件...</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{animationDelay: '0.5s'}}></div>
+            <span className="text-gray-400 text-sm">类型检查中...</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" style={{animationDelay: '1s'}}></div>
+            <span className="text-gray-400 text-sm">编译优化...</span>
+          </div>
+        </div>
+
+        {/* 进度条 */}
+        <div className="mt-8 max-w-md mx-auto">
+          <div className="w-full h-1 bg-gray-800 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-emerald-400 to-blue-400 transition-all duration-300 ease-out"
+              style={{
+                width: `${Math.min(100, (currentStep / codeSteps.length) * 100)}%`
+              }}
+            ></div>
+          </div>
+          <div className="flex justify-between text-xs text-gray-500 mt-2">
+            <span>代码生成</span>
+            <span>{Math.min(100, Math.round((currentStep / codeSteps.length) * 100))}%</span>
           </div>
         </div>
       </div>
-      
-      <style jsx>{`
-        .matrix-loading-container {
-          position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          pointer-events: none;
-          z-index: 100;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 32px;
-        }
-        
-        .matrix-title {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        
-        .matrix-title-text {
-          font-family: system-ui, -apple-system, sans-serif;
-          font-weight: 400;
-          font-size: 18px;
-          color: #22c55e;
-          letter-spacing: 0.1em;
-        }
-        
-        .matrix-code-status {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-          min-width: 300px;
-          font-family: 'Courier New', 'Consolas', 'Monaco', monospace;
-        }
-        
-        .matrix-status-line {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          opacity: 0;
-          font-size: 12px;
-        }
-        
-        .status-prompt {
-          color: #16a34a;
-          font-weight: bold;
-        }
-        
-        .status-text {
-          color: #22c55e;
-          opacity: 0.8;
-        }
-        
-        .matrix-status-1 {
-          animation: fadeInType 0.8s ease-out 0.5s forwards;
-        }
-        
-        .matrix-status-2 {
-          animation: fadeInType 0.8s ease-out 1.2s forwards;
-        }
-        
-        .matrix-status-3 {
-          animation: fadeInType 0.8s ease-out 2.0s forwards;
-        }
-        
-        .matrix-progress-bar {
-          width: 400px;
-          height: 2px;
-          background-color: #1f2937;
-          border-radius: 2px;
-          overflow: hidden;
-          box-shadow: 0 0 10px rgba(34, 197, 94, 0.3);
-        }
-        
-        .matrix-progress-fill {
-          height: 100%;
-          background: linear-gradient(90deg, #22c55e, #16a34a, #22c55e);
-          background-size: 200% 100%;
-          box-shadow: 0 0 20px rgba(34, 197, 94, 0.6);
-        }
-        
-        .matrix-progress-animate {
-          width: 0%;
-          animation: progress-fill 3s ease-out forwards, progress-glow 2s ease-in-out infinite;
-        }
-        
-        @keyframes progress-fill {
-          0% { width: 0%; }
-          100% { width: 100%; }
-        }
-        
-        @keyframes progress-glow {
-          0%, 100% { 
-            background-position: 0% 50%;
-            box-shadow: 0 0 20px rgba(34, 197, 94, 0.6);
-          }
-          50% { 
-            background-position: 100% 50%;
-            box-shadow: 0 0 30px rgba(34, 197, 94, 0.8);
-          }
-        }
-        
-        @keyframes fadeInType {
-          0% { 
-            opacity: 0;
-            transform: translateX(-10px);
-          }
-          100% { 
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
-      `}</style>
     </div>
   )
 }
 
-export default MatrixLoading
+// 根据代码内容返回对应的颜色类
+function getLineColor(line: string): string {
+  if (line.trim().startsWith('import')) return 'text-pink-400'
+  if (line.trim().startsWith('const') || line.trim().startsWith('let') || line.trim().startsWith('var')) return 'text-blue-400'
+  if (line.includes('useState') || line.includes('useEffect')) return 'text-purple-400'
+  if (line.includes('return')) return 'text-yellow-400'
+  if (line.includes('className') || line.includes('<') || line.includes('>')) return 'text-green-400'
+  if (line.trim().startsWith('//')) return 'text-gray-500'
+  return 'text-gray-300'
+}
+
+export default CodeGenerationLoading

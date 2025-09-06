@@ -30,13 +30,6 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
   const [dynamicCommands, setDynamicCommands] = useState<RuntimeCommand[]>([])
   const [currentPageName, setCurrentPageName] = useState('')
   
-  // 语音识别状态
-  const [isListening, setIsListening] = useState(false)
-  const [isSupported, setIsSupported] = useState(false)
-  const [transcript, setTranscript] = useState('')
-  const [lastCommand, setLastCommand] = useState('')
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
-  const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     // 初始化全局错误处理
@@ -48,7 +41,7 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
     errorHandler.addErrorListener(handleGlobalError)
 
     initializeRuntime()
-    initializeSpeechRecognition()
+    // AI增强视图复用全局语音系统，不需要初始化自己的语音识别
     
     // 监听指令变化
     const handleCommandsChange = (newCommands: RuntimeCommand[]) => {
@@ -132,104 +125,16 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
       runtimeService.removeListener(handleCommandsChange)
       window.removeEventListener('message', handleMessage)
       errorHandler.removeErrorListener(handleGlobalError)
-      if (recognitionRef.current) {
-        recognitionRef.current.stop()
-      }
-      if (restartTimeoutRef.current) {
-        clearTimeout(restartTimeoutRef.current)
-      }
     }
   }, [runtimeService, appConfig, websiteUrl])
 
-  // 初始化语音识别
-  const initializeSpeechRecognition = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-      if (SpeechRecognition) {
-        setIsSupported(true)
-        const recognition = new SpeechRecognition()
-        
-        recognition.continuous = true
-        recognition.interimResults = true
-        recognition.lang = 'zh-CN'
-        recognition.maxAlternatives = 3
+  // AIEnhancedView不处理语音识别，由全局RealtimeVoice负责
 
-        recognition.onstart = () => {
-          setIsListening(true)
-          setError('')
-          console.log('Voice recognition started')
-        }
+  // 语音重启逻辑移至全局RealtimeVoice
 
-        recognition.onresult = (event) => {
-          let currentTranscript = ''
-          let finalTranscript = ''
-
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            const result = event.results[i]
-            if (result.isFinal) {
-              finalTranscript += result[0].transcript
-            } else {
-              currentTranscript += result[0].transcript
-            }
-          }
-
-          setTranscript(currentTranscript)
-          
-          if (finalTranscript) {
-            console.log('Final transcript:', finalTranscript)
-            processVoiceCommand(finalTranscript.trim())
-            setLastCommand(finalTranscript.trim())
-          }
-        }
-
-        recognition.onerror = (event) => {
-          console.error('Speech recognition error:', event.error)
-          if (event.error === 'no-speech') {
-            scheduleRestart()
-            return
-          }
-          setError(`语音识别错误: ${event.error}`)
-          setIsListening(false)
-        }
-
-        recognition.onend = () => {
-          console.log('Voice recognition ended')
-          setIsListening(false)
-          setTranscript('')
-          
-          if (recognitionRef.current && isListening) {
-            scheduleRestart()
-          }
-        }
-
-        recognitionRef.current = recognition
-      } else {
-        setIsSupported(false)
-        setError('Speech recognition not supported in this browser')
-      }
-    }
-  }, [isListening])
-
-  // 重启语音识别
-  const scheduleRestart = useCallback(() => {
-    if (restartTimeoutRef.current) {
-      clearTimeout(restartTimeoutRef.current)
-    }
-    
-    restartTimeoutRef.current = setTimeout(() => {
-      if (recognitionRef.current && !isListening) {
-        try {
-          recognitionRef.current.start()
-        } catch (error) {
-          console.error('Failed to restart recognition:', error)
-        }
-      }
-    }, 1000)
-  }, [isListening])
-
-  // 处理语音指令
+  // 处理语音指令（由全局RealtimeVoice调用）
   const processVoiceCommand = useCallback(async (command: string) => {
-    console.log('Processing voice command:', command)
+    console.log('🎤 [AIEnhanced] Processing voice command:', command)
     console.log('🔍 可用运行时指令:', commands.length, '个')
     console.log('🔍 运行时指令列表:', commands.map(cmd => ({ id: cmd.id, triggers: cmd.triggers })))
 
@@ -265,23 +170,20 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
       }
     }
   }, [runtimeService])
-
-  // 切换语音监听
-  const toggleListening = useCallback(() => {
-    if (!recognitionRef.current || !isSupported) return
-
-    if (isListening) {
-      recognitionRef.current.stop()
-      setIsListening(false)
-    } else {
-      try {
-        recognitionRef.current.start()
-      } catch (error) {
-        console.error('Failed to start recognition:', error)
-        setError('Failed to start voice recognition')
+  
+  // 将语音处理函数注册到全局，供RealtimeVoice使用
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.aiEnhancedProcessVoiceCommand = processVoiceCommand
+      console.log('✅ [AIEnhanced] 已注册全局语音处理函数')
+      
+      return () => {
+        delete window.aiEnhancedProcessVoiceCommand
       }
     }
-  }, [isListening, isSupported])
+  }, [processVoiceCommand])
+
+  // 语音监听由全局RealtimeVoice负责
 
   // 切换页面时的清理函数
   const clearPageCommands = useCallback(() => {
@@ -294,8 +196,7 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
   const handleIframeNavigationSimple = async (target: string) => {
     console.log('🚀 简化iframe导航:', target)
     
-    // 页面切换前清除之前的动态指令
-    clearPageCommands()
+    // 不立即清除指令，让新页面有时间注册
     
     return new Promise<void>((resolve, reject) => {
       try {
@@ -306,7 +207,14 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
         }
 
         console.log('✅ iframe ref存在，开始设置URL')
-        const fullUrl = target.startsWith('http') ? target : websiteUrl + target
+        
+        // 构建完整URL并添加triangle_os参数
+        let fullUrl = target.startsWith('http') ? target : websiteUrl + target
+        
+        // 添加triangle_os=true参数来隐藏侧边栏
+        const separator = fullUrl.includes('?') ? '&' : '?'
+        fullUrl = fullUrl + separator + 'triangle_os=true'
+        
         console.log(`🔗 设置iframe URL: ${fullUrl}`)
         
         // 设置iframe源
@@ -318,6 +226,20 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
           if (iframeRef.current) {
             iframeRef.current.removeEventListener('load', handleLoad)
           }
+          
+          // 页面加载完成后，给新页面2秒时间注册指令，然后清除旧指令
+          setTimeout(() => {
+            console.log('🗑️ 延迟清除旧页面指令（页面已有时间注册新指令）')
+            setDynamicCommands(prev => {
+              if (prev.length > 0) {
+                console.log('📝 当前动态指令:', prev.map(cmd => cmd.id))
+                // 保留当前所有指令，因为新页面应该已经注册了
+                return prev
+              }
+              return prev
+            })
+          }, 2000) // 给页面2秒时间完成指令注册
+          
           resolve()
         }
         
@@ -467,7 +389,12 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
     setLoading(true)
     setError('')
     
-    console.log('🔥 AI增强模式执行指令:', command)
+    // 安全地打印命令信息，避免编码问题
+    console.log('🔥 AI增强模式执行指令:')
+    console.log('  - ID:', command.id)
+    console.log('  - Name:', command.name)
+    console.log('  - Action Type:', command.action?.type)
+    console.log('  - Action Target:', command.action?.target)
     console.log('🔥 当前页面:', currentPage)
     console.log('🔥 WebsiteUrl:', websiteUrl)
     
@@ -594,6 +521,28 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
         return
       }
 
+      // 处理页面本地指令 (custom类型，target为local)
+      if (command.action.type === 'custom' && command.action.target === 'local') {
+        console.log('📮 转发指令到iframe页面:', command.id)
+        
+        // 通过postMessage将语音命令发送给iframe中的页面
+        if (iframeRef.current) {
+          // 发送语音命令事件到iframe
+          iframeRef.current.contentWindow?.postMessage({
+            type: 'voice_command_from_parent',
+            commandId: command.id,
+            triggers: command.triggers
+          }, '*')
+          
+          console.log('✅ 已发送语音指令到页面')
+        } else {
+          console.warn('⚠️ iframe不存在，无法转发指令')
+          setError('页面未加载，无法执行指令')
+        }
+        
+        return
+      }
+      
       try {
         const success = await runtimeService.executeCommand(command)
         
@@ -640,20 +589,6 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
     }, 100)
   }, [isGeneratingPage, currentPage])
 
-  // 自动开始语音监听
-  useEffect(() => {
-    if (isSupported && recognitionRef.current && !isListening && !error) {
-      const timer = setTimeout(() => {
-        try {
-          recognitionRef.current?.start()
-        } catch (error) {
-          console.error('Auto-start failed:', error)
-        }
-      }, 2000)
-      
-      return () => clearTimeout(timer)
-    }
-  }, [isSupported, isListening, error])
 
   // 渲染状态调试
   console.log('🎨 AIEnhancedView渲染:', { isGeneratingPage, currentPage })
@@ -828,87 +763,6 @@ const AIEnhancedView: React.FC<AIEnhancedViewProps> = ({ websiteUrl, appConfig, 
           </div>
         </div>
         
-        {/* 下部：语音显示区 */}
-        <div className="h-32 border-t border-gray-700 bg-gradient-to-b from-slate-900 to-black flex items-center justify-center px-8">
-          <div className="flex items-center space-x-8 w-full max-w-4xl">
-            {/* 语音按钮 */}
-            <button
-              onClick={toggleListening}
-              className={`
-                w-16 h-16 rounded-full shadow-2xl transition-all duration-500 flex items-center justify-center relative flex-shrink-0
-                ${!isSupported 
-                  ? 'bg-gray-600 cursor-not-allowed' 
-                  : isListening 
-                    ? 'bg-red-500 hover:bg-red-400' 
-                    : 'bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-400 hover:to-purple-500'
-                }
-                ${isSupported ? 'hover:scale-110 active:scale-95' : ''}
-              `}
-              title={!isSupported ? '语音识别不支持' : isListening ? '停止语音识别' : '开始语音控制'}
-              disabled={!isSupported}
-            >
-              {!isSupported ? (
-                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z M13 13l6 6" />
-                </svg>
-              ) : isListening ? (
-                <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 6h12v12H6z"/>
-                </svg>
-              ) : (
-                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                </svg>
-              )}
-              
-              {/* 语音指示环 */}
-              {isListening && (
-                <>
-                  <div className="absolute inset-0 rounded-full border-2 border-red-300 animate-ping"></div>
-                  <div className="absolute -inset-2 rounded-full border border-red-200 animate-pulse"></div>
-                  <div className="absolute -inset-4 rounded-full border border-red-100 opacity-50 animate-pulse" style={{animationDelay: '0.5s'}}></div>
-                </>
-              )}
-            </button>
-            
-            {/* 转录显示区 */}
-            <div className="flex-1 min-h-[80px] flex items-center">
-              {transcript ? (
-                <div className="text-white text-xl font-light leading-relaxed animate-pulse">
-                  {transcript}
-                  <span className="animate-pulse ml-1 text-blue-400">|</span>
-                </div>
-              ) : lastCommand ? (
-                <div className="text-white text-lg font-light leading-relaxed opacity-80">
-                  最后指令: {lastCommand}
-                </div>
-              ) : (
-                <div className="text-white text-base opacity-40">
-                  {!isSupported ? '语音识别在当前环境下不可用' : 
-                   isListening ? '请开始说话...' : '点击麦克风开始语音交互'}
-                </div>
-              )}
-              
-              {/* 错误显示 */}
-              {error && (
-                <div className="ml-4 text-red-400 text-sm bg-red-500 bg-opacity-10 rounded-lg px-3 py-1 backdrop-blur-sm">
-                  {error}
-                </div>
-              )}
-            </div>
-
-            {/* 状态指示 */}
-            <div className="flex items-center space-x-2 flex-shrink-0">
-              <div className={`w-3 h-3 rounded-full ${
-                !isSupported ? 'bg-gray-400' : 
-                isListening ? 'bg-red-400 animate-pulse' : 'bg-white bg-opacity-30'
-              }`}></div>
-              <span className="text-white text-sm opacity-70 whitespace-nowrap">
-                {!isSupported ? '不可用' : isListening ? '监听中' : '待命'}
-              </span>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* 右侧：指令按钮面板 */}
@@ -1104,12 +958,5 @@ if (typeof document !== 'undefined' && !document.getElementById('page-emerge-sty
   document.head.appendChild(styleSheet);
 }
 
-// Extend Window interface for TypeScript
-declare global {
-  interface Window {
-    SpeechRecognition: typeof SpeechRecognition
-    webkitSpeechRecognition: typeof SpeechRecognition
-  }
-}
 
 export default AIEnhancedView

@@ -5,6 +5,9 @@
  * 完全与具体业务解耦，支持任意符合协议的应用集成
  */
 
+import { navigationContext, NavigationContext } from '../context/NavigationContext'
+import { appRegistry } from '../config/appConfig'
+
 export interface AppConfig {
   id: string
   name: string
@@ -32,7 +35,7 @@ export interface RuntimeCommand {
 }
 
 export interface RuntimeAction {
-  type: 'navigate' | 'dom_action' | 'api_call' | 'system_command' | 'ai_style' | 'custom'
+  type: 'navigate' | 'dom_action' | 'api_call' | 'system_command' | 'ai_style' | 'custom' | 'execute'
   [key: string]: any
 }
 
@@ -74,6 +77,106 @@ export class RuntimeService {
   private context: RuntimeContext | null = null
   private authConfig: AuthConfig | null = null
   private authStatus: AuthStatus = { authenticated: false }
+
+  constructor() {
+    // Listen for dynamic command registration from pages
+    this.setupCommandRegistrationListeners()
+    // Listen for iframe postMessage commands
+    this.setupIframeCommandListeners()
+  }
+
+  /**
+   * 设置动态指令注册监听器
+   */
+  private setupCommandRegistrationListeners() {
+    // Only setup listeners in browser environment
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    // Register commands from pages
+    window.addEventListener('triangleos_register_commands', (event: any) => {
+      const { commands, page } = event.detail
+      console.log('📋 [RuntimeService] Registering dynamic commands for page:', page, commands)
+      
+      if (Array.isArray(commands)) {
+        const pageKey = `page:${page}`
+        this.commands.set(pageKey, commands)
+        this.notifyListeners()
+        console.log('✅ [RuntimeService] Dynamic commands registered for', page)
+      }
+    })
+
+    // Unregister commands when pages unmount
+    window.addEventListener('triangleos_unregister_commands', (event: any) => {
+      const { page } = event.detail
+      console.log('📋 [RuntimeService] Unregistering commands for page:', page)
+      
+      const pageKey = `page:${page}`
+      if (this.commands.has(pageKey)) {
+        this.commands.delete(pageKey)
+        this.notifyListeners()
+        console.log('✅ [RuntimeService] Commands unregistered for', page)
+      }
+    })
+  }
+
+  /**
+   * 设置iframe指令监听器 - 处理来自iframe的postMessage指令注册
+   */
+  private setupIframeCommandListeners() {
+    // Only setup listeners in browser environment
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    // Listen for postMessage events from iframes
+    window.addEventListener('message', (event: MessageEvent) => {
+      // Security check - only accept messages from known origins
+      const allowedOrigins = ['http://localhost:3000', 'http://localhost:3001']
+      if (!allowedOrigins.includes(event.origin) && !event.origin.startsWith('http://localhost')) {
+        return
+      }
+
+      // Handle command registration from iframe
+      if (event.data?.type === 'command_registered') {
+        const { command, page } = event.data
+        console.log('📮 [RuntimeService] Received iframe command registration:', command.id, 'for page:', page)
+        
+        if (command && page) {
+          const pageKey = `page:${page}`
+          const existingCommands = this.commands.get(pageKey) || []
+          
+          // Check if command already exists to avoid duplicates
+          const commandExists = existingCommands.some(cmd => cmd.id === command.id)
+          if (!commandExists) {
+            const updatedCommands = [...existingCommands, command]
+            this.commands.set(pageKey, updatedCommands)
+            this.notifyListeners()
+            console.log('✅ [RuntimeService] Iframe command registered:', command.id)
+          }
+        }
+      }
+      
+      // Handle command unregistration from iframe
+      else if (event.data?.type === 'command_unregistered') {
+        const { commandId, page } = event.data
+        console.log('📮 [RuntimeService] Received iframe command unregistration:', commandId, 'for page:', page)
+        
+        if (commandId && page) {
+          const pageKey = `page:${page}`
+          const existingCommands = this.commands.get(pageKey) || []
+          const filteredCommands = existingCommands.filter(cmd => cmd.id !== commandId)
+          
+          if (filteredCommands.length !== existingCommands.length) {
+            this.commands.set(pageKey, filteredCommands)
+            this.notifyListeners()
+            console.log('✅ [RuntimeService] Iframe command unregistered:', commandId)
+          }
+        }
+      }
+    })
+  }
 
   /**
    * 加载应用配置
@@ -190,14 +293,22 @@ export class RuntimeService {
     // 全局指令
     const globalCommands = this.commands.get('global') || []
     allCommands.push(...globalCommands)
+    console.log('🔍 [RuntimeService] Global commands:', globalCommands.length)
 
     // 当前页面指令
+    console.log('🔍 [RuntimeService] Current context URL:', this.context?.current_url)
     if (this.context?.current_url) {
       const pageId = this.extractPageId(this.context.current_url)
+      console.log('🔍 [RuntimeService] Extracted page ID:', pageId)
       const pageCommands = this.commands.get(`page:${pageId}`) || []
+      console.log('🔍 [RuntimeService] Page commands for', pageId, ':', pageCommands.length)
       allCommands.push(...pageCommands)
     }
+    
+    // 也检查所有注册的页面指令
+    console.log('🔍 [RuntimeService] All registered page keys:', Array.from(this.commands.keys()))
 
+    console.log('🔍 [RuntimeService] Total commands returned:', allCommands.length)
     return allCommands
   }
 
@@ -206,15 +317,25 @@ export class RuntimeService {
    */
   private extractPageId(url: string): string {
     try {
-      const urlObj = new URL(url)
-      const path = urlObj.pathname
+      let path: string
+      
+      // 如果是完整URL，提取pathname
+      if (url.startsWith('http')) {
+        const urlObj = new URL(url)
+        path = urlObj.pathname
+      } else {
+        // 如果只是路径，直接使用
+        path = url
+      }
+      
+      console.log('🔍 [RuntimeService] Extracting page ID from path:', path)
       
       if (path === '/') return 'home'
       
-      // 移除开头的斜杠并获取第一部分
-      const segments = path.substring(1).split('/')
-      return segments[0] || 'home'
-    } catch {
+      // 直接返回完整路径作为页面ID，这样与注册时的键保持一致
+      return path
+    } catch (error) {
+      console.warn('⚠️ [RuntimeService] Failed to extract page ID from:', url, error)
       return 'home'
     }
   }
@@ -259,7 +380,9 @@ export class RuntimeService {
         case 'ai_style':
           return await this.executeAIStyle(command.action)
         case 'custom':
-          return await this.executeCustom(command.action)
+          return await this.executeCustom(command.action, params)
+        case 'execute':
+          return await this.executeCustomCommand(command.action)
         default:
           console.error('未知的指令类型:', command.action.type)
           return false
@@ -271,20 +394,38 @@ export class RuntimeService {
   }
 
   private async executeNavigate(action: RuntimeAction): Promise<boolean> {
+    console.log('🚀 [RuntimeService] executeNavigate:', action.target)
+    
+    // 解析目标URL，支持占位符和Context参数
+    let targetUrl = this.resolveNavigationUrl(action.target)
+    
     // For iframe context (AI enhanced mode) - use postMessage
     if (this.context?.iframe) {
+      // Add Triangle OS mode parameter to hide sidebar in AI enhanced mode
+      if (!targetUrl.includes('triangle_os=')) {
+        const separator = targetUrl.includes('?') ? '&' : '?'
+        targetUrl = `${targetUrl}${separator}triangle_os=true`
+      }
+        
       this.context.iframe.contentWindow?.postMessage({
         type: 'os_navigate',
-        url: action.target
+        url: targetUrl
       }, '*')
     } 
     // For Voice commands - emit navigation event to update iframe in Dashboard
     else if (this.currentApp) {
       // Add Triangle OS mode parameter to hide sidebar and simplify UI
-      const triangleOSParams = new URLSearchParams()
-      triangleOSParams.set('triangle_os', 'true')
+      const baseUrl = `${this.currentApp.url}${action.target}`
       
-      const fullUrl = `${this.currentApp.url}${action.target}?${triangleOSParams.toString()}`
+      // Check if URL already has query parameters
+      const separator = baseUrl.includes('?') ? '&' : '?'
+      const fullUrl = `${baseUrl}${separator}triangle_os=true`
+      
+      // Check if we're in browser environment
+      if (typeof window === 'undefined') {
+        console.warn('⚠️ [RuntimeService] Cannot navigate: not in browser environment')
+        return false
+      }
       
       // Emit navigation event to update iframe instead of full page navigation
       const navigationEvent = new CustomEvent('os_iframe_navigation', {
@@ -372,12 +513,55 @@ export class RuntimeService {
     return false
   }
 
-  private async executeCustom(action: RuntimeAction): Promise<boolean> {
+  private async executeCustom(action: RuntimeAction, params?: any): Promise<boolean> {
+    // Handle iframe local commands
+    if (action.target === 'local' && this.context?.iframe) {
+      console.log('🎯 [RuntimeService] Executing local iframe command', action.commandId, 'with params:', params)
+      
+      // Send message to iframe to handle the command locally
+      this.context.iframe.contentWindow?.postMessage({
+        type: 'voice_command_from_parent',
+        commandId: action.commandId || action.id, // Use commandId if available, fallback to id
+        params: params // Pass any parameters (like voice input text)
+      }, '*')
+      
+      return true
+    }
+    
     if (this.context?.customHandler) {
       return this.context.customHandler(action, this.context)
     }
     console.warn('自定义处理器未注册')
     return false
+  }
+
+  // Execute custom command (send event to app)
+  private async executeCustomCommand(action: RuntimeAction): Promise<boolean> {
+    try {
+      console.log('🎯 [RuntimeService] Executing custom command:', action.target)
+      
+      // Check if we're in browser environment
+      if (typeof window === 'undefined') {
+        console.warn('⚠️ [RuntimeService] Cannot execute custom command: not in browser environment')
+        return false
+      }
+      
+      // Send custom event to the application
+      const customEvent = new CustomEvent('triangleos_voice_command', {
+        detail: {
+          command: action.target,
+          timestamp: Date.now()
+        }
+      })
+      
+      window.dispatchEvent(customEvent)
+      console.log('✅ [RuntimeService] Custom command event sent:', action.target)
+      
+      return true
+    } catch (error) {
+      console.error('💥 [RuntimeService] Custom command execution failed:', error)
+      return false
+    }
   }
 
   /**
@@ -434,7 +618,7 @@ export class RuntimeService {
         }
       }
 
-      // 对于Firebase认证，通过iframe内部的Firebase客户端检查状态
+      // 对于Firebase认证，优先通过iframe内部的Firebase客户端检查状态
       if (this.authConfig.provider === 'firebase' && this.context?.iframe) {
         console.log('🔥 检查Firebase认证状态通过iframe')
         
@@ -660,6 +844,69 @@ export class RuntimeService {
     } catch {
       return true // 如果URL解析失败，默认需要认证
     }
+  }
+
+  /**
+   * 解析导航URL，支持占位符替换和Context参数
+   */
+  private resolveNavigationUrl(url: string): string {
+    console.log('🔗 [RuntimeService] Resolving navigation URL:', url)
+    
+    // 如果URL没有占位符，直接返回
+    if (!url.includes('{')) {
+      return url
+    }
+    
+    // 检查是否是app配置ID（用于通过appRegistry解析）
+    if (!url.startsWith('/') && !url.startsWith('http')) {
+      // 可能是应用配置ID，尝试从appRegistry解析
+      try {
+        const context = navigationContext.getContext()
+        const resolved = appRegistry.resolveAppUrl(url, context)
+        
+        if (resolved.missing.length > 0) {
+          console.warn(`⚠️ [RuntimeService] Missing required parameters for app ${url}:`, resolved.missing)
+          // 可以在此处提示用户设置缺失参数
+          return url // 返回原始URL作为fallback
+        }
+        
+        console.log('✅ [RuntimeService] Resolved app URL:', resolved.url)
+        return resolved.url
+      } catch (error) {
+        console.warn(`⚠️ [RuntimeService] Failed to resolve app URL ${url}:`, error)
+        return url
+      }
+    }
+    
+    // 直接URL替换占位符
+    const context = navigationContext.getContext()
+    const resolvedUrl = navigationContext.resolvePlaceholders(url)
+    
+    console.log('✅ [RuntimeService] URL resolved:', url, '->', resolvedUrl)
+    return resolvedUrl
+  }
+
+  /**
+   * 设置导航上下文参数
+   */
+  setNavigationContext(key: string, value: any): void {
+    navigationContext.set(key, value)
+    console.log(`🔧 [RuntimeService] Set navigation context ${key}:`, value)
+  }
+
+  /**
+   * 批量更新导航上下文
+   */
+  updateNavigationContext(updates: Record<string, any>): void {
+    navigationContext.update(updates)
+    console.log('🔄 [RuntimeService] Updated navigation context:', updates)
+  }
+
+  /**
+   * 获取导航上下文
+   */
+  getNavigationContext(): NavigationContext {
+    return navigationContext.getContext()
   }
 
   /**

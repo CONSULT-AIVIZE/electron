@@ -47,7 +47,13 @@
       "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
       "Read(/Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
       "Bash(npm run build:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Read(//Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/src/app/project/components/**)",
+      "Read(//Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/src/**)",
+      "Bash(npm run dev-nextjs:*)",
+      "Read(//Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/web/**)",
+      "Bash(npm run dev:*)",
+      "Read(//Users/heyuehui/Desktop/CONSULT-AIVIZE/CONSULT_AI/**)"
     ],
     "deny": [],
     "ask": []

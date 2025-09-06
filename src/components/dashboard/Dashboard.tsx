@@ -4,7 +4,8 @@ import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import RealtimeVoice from '../RealtimeVoice'
 import AIEnhancedView from '../AIEnhancedView'
-import MatrixLoading from '../MatrixLoading'
+import CodeGenerationLoading from '../MatrixLoading'
+import CommandPanel from '../CommandPanel'
 import { RuntimeService } from '../../core/runtime/RuntimeService'
 import { getSharedRuntimeService } from '../../core/runtime/sharedRuntime'
 import type { AppConfig } from '../../core/config/appConfig'
@@ -82,6 +83,25 @@ const Dashboard = () => {
     }
   }, [])
 
+  // Listen for login success and return to voice control interface
+  useEffect(() => {
+    const handleLoginSuccess = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'login_success') {
+        console.log('✅ [Dashboard] 用户登录成功，返回语音控制界面')
+        // 隐藏iframe，回到语音控制界面
+        setShowAppIframe(false)
+        setCurrentIframeUrl('')
+        setIframeLoaded(false)
+      }
+    }
+
+    window.addEventListener('message', handleLoginSuccess)
+    
+    return () => {
+      window.removeEventListener('message', handleLoginSuccess)
+    }
+  }, [])
+
   // Initialize OS with universal app system
   useEffect(() => {
     const initializeOS = async () => {
@@ -103,6 +123,13 @@ const Dashboard = () => {
           console.log('📡 [Dashboard] 加载应用到 RuntimeService...')
           const loadResult = await sharedRuntimeService.loadApp(startupApp)
           console.log('🔄 [Dashboard] 应用加载结果:', loadResult)
+          
+          // 暂时禁用认证重定向，保持在语音控制界面
+          if (loadResult.redirectUrl) {
+            console.log('⚠️ [Dashboard] 检测到重定向需求，但暂时禁用以保持稳定')
+            console.log('🏠 [Dashboard] 保持在语音控制界面')
+            // 不执行任何自动重定向
+          }
         } else {
           console.warn('⚠️ 没有可用的应用配置')
         }
@@ -171,27 +198,6 @@ const Dashboard = () => {
     )
   }
 
-  // AI增强模式：双面板
-  if (viewMode === 'ai_enhanced') {
-    if (!currentApp) {
-      return (
-        <div className="h-full w-full flex items-center justify-center bg-black text-white">
-          <div className="text-center">
-            <div className="text-xl mb-2">⚙️</div>
-            <div>正在初始化应用...</div>
-          </div>
-        </div>
-      )
-    }
-
-    return (
-      <AIEnhancedView
-        websiteUrl={currentApp.url}
-        appConfig={currentApp}
-        onToggleMode={switchToNextMode}
-      />
-    )
-  }
 
   // AI模式：与增强模式相同的左侧内容（上面iframe，下面语音）
   if (!currentApp) {
@@ -207,7 +213,9 @@ const Dashboard = () => {
 
   return (
     <div className="h-full w-full bg-black">
-      <div className="flex flex-col h-full">
+      <div className={`${viewMode === 'ai_enhanced' ? 'flex' : 'flex flex-col'} h-full`}>
+        {/* 主内容区域 */}
+        <div className={`${viewMode === 'ai_enhanced' ? 'flex-1 flex flex-col' : 'w-full flex flex-col flex-1'}`}>
         {/* 上部：页面显示区 */}
         <div className={`flex-1 relative ${showAppIframe ? '' : 'bg-gradient-to-b from-gray-900 to-black'}`}>
           {currentIframeUrl && (
@@ -217,10 +225,15 @@ const Dashboard = () => {
               className={`w-full h-full border-0 ${!iframeLoaded ? 'opacity-0' : 'opacity-100'} transition-opacity duration-300`}
               title="CONSULT_AI Application"
               id="app-iframe"
-              onLoad={() => {
+              onLoad={(e) => {
                 setIframeLoaded(true)
                 setShowAppIframe(true)
                 setIsNavigating(false)
+                
+                // Set iframe reference in RuntimeService context for command execution
+                const iframeElement = e.target as HTMLIFrameElement
+                sharedRuntimeService.setContext({ iframe: iframeElement })
+                console.log('🖼️ [Dashboard] Set iframe in RuntimeService context (AI mode)')
               }}
             />
           )}
@@ -294,16 +307,33 @@ const Dashboard = () => {
         <div className="h-32 border-t border-gray-700 bg-gradient-to-b from-slate-900 to-black">
           <RealtimeVoice className="h-full" />
         </div>
+        </div>
+        
+        {/* 右侧：指令面板 - 仅在AI增强模式显示 */}
+        {viewMode === 'ai_enhanced' && (
+          <CommandPanel className="w-80 flex-shrink-0" />
+        )}
       </div>
       
       {/* MatrixLoading 覆盖层 */}
       {(isNavigating || (currentIframeUrl && !iframeLoaded)) && (
         <div className="absolute inset-0 z-[100]">
-          <MatrixLoading
+          <CodeGenerationLoading
             message={isNavigating ? `正在导航到 ${navigationTarget}` : '正在加载页面...'}
             duration={isNavigating ? 1200 : 5000}
             onComplete={() => {
-              console.log('[Dashboard] MatrixLoading completed')
+              console.log('[Dashboard] CodeGenerationLoading completed')
+              // 强制结束导航状态，防止无限循环
+              if (isNavigating) {
+                console.log('[Dashboard] Forcing navigation complete to prevent infinite loading')
+                setIsNavigating(false)
+              }
+              // 如果有iframe URL需要显示（包括登录页面和用户导航）
+              if (currentIframeUrl && !iframeLoaded) {
+                console.log('[Dashboard] Showing iframe content:', currentIframeUrl)
+                setIframeLoaded(true)
+                setShowAppIframe(true)
+              }
             }}
           />
         </div>
